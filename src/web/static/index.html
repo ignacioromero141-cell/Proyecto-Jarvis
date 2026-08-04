@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Dashboard</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    nav h3, section h2 { margin-top:0; }
+    .dashboard { display:grid; gap:16px; }
+    .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .quick-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .capture-row { display:grid; grid-template-columns:160px 1fr 150px; gap:10px; margin-top:10px; }
+    .content-grid { display:grid; grid-template-columns:1.4fr .8fr; gap:16px; }
+    @media (max-width:980px) {
+      .grid-4, .grid-3, .quick-actions, .content-grid { grid-template-columns:1fr 1fr; }
+    }
+    @media (max-width:650px) {
+      .dashboard, .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid { min-width:0; max-width:100%; }
+      .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Jarvis local</p>
+      <h1 id="greeting">Hola</h1>
+      <p class="subtitle">Tu centro personal para organizar ideas, tareas, recuerdos y finanzas desde una misma app.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="dashboard"></div>
+
+    <div class="dashboard">
+      <section class="panel">
+        <h2>Finanzas del mes</h2>
+        <p class="muted">Resumen conectado al modulo Finanzas.</p>
+        <div class="grid-4">
+          <div class="card income"><span>Ingresos</span><strong id="incomeTotal">$0</strong></div>
+          <div class="card expense"><span>Gastos</span><strong id="expenseTotal">$0</strong></div>
+          <div class="card saving"><span>Ahorro / inversiones</span><strong id="savingTotal">$0</strong></div>
+          <div class="card balance"><span>Balance disponible</span><strong id="balanceTotal">$0</strong></div>
+        </div>
+      </section>
+
+      <section id="organizacion" class="panel">
+        <h2>Organizacion</h2>
+        <p class="muted">Resumen conectado a ideas, tareas y recuerdos.</p>
+        <div class="grid-3">
+          <div class="card"><span>Tareas pendientes</span><strong id="pendingCount">0</strong></div>
+          <div class="card"><span>Ideas guardadas</span><strong id="ideasCount">0</strong></div>
+          <div class="card"><span>Recuerdos</span><strong id="memoriesCount">0</strong></div>
+        </div>
+        <p id="nextTask" class="muted">Buscando proxima tarea...</p>
+        <a class="button-link light" href="organization.html">Ver Organizacion</a>
+      </section>
+
+      <section class="panel">
+        <h2>Acciones rapidas</h2>
+        <div class="quick-actions">
+          <a class="button-link finance" href="finance.html">Agregar un gasto</a>
+          <a class="button-link income" href="finance.html">Agregar un ingreso</a>
+          <button onclick="prepareCapture('tarea')">Crear una tarea</button>
+          <button class="secondary" onclick="prepareCapture('idea')">Guardar una idea</button>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <section class="panel">
+          <h2>Captura rapida</h2>
+          <textarea id="text" placeholder="Ej: tengo que estudiar, recorda que..., idea..."></textarea>
+          <div class="capture-row">
+            <select id="type">
+              <option value="idea">idea</option>
+              <option value="tarea">tarea</option>
+              <option value="recuerdo">recuerdo</option>
+            </select>
+            <button onclick="saveManual()">Guardar con tipo elegido</button>
+            <button class="secondary" onclick="saveQuick()">Captura rapida</button>
+          </div>
+          <div id="status" class="status"></div>
+
+          <h3 style="margin-top:18px">Ultimos registros</h3>
+          <table>
+            <thead><tr><th>Tipo</th><th>Estado</th><th>Contenido</th></tr></thead>
+            <tbody id="records"></tbody>
+          </table>
+        </section>
+
+        <aside class="panel">
+          <h2>Hoy</h2>
+          <p id="todaySummary" class="muted">Cargando...</p>
+          <h3>Tareas pendientes</h3>
+          <ul id="pending" class="list"></ul>
+          <h3>Movimiento reciente</h3>
+          <ul id="recentFinance" class="list"></ul>
+          <button class="light" style="margin-top:12px" onclick="makeBackup()">Crear backup de memoria</button>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let records = [];
+    let financeSummary = null;
+    let financeMovements = [];
+    const money = new Intl.NumberFormat("es-AR", { style:"currency", currency:"ARS", maximumFractionDigits:0 });
+
+    function currentMonth() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function setGreeting() {
+      const hour = new Date().getHours();
+      const greeting = hour < 12 ? "Buenos dias" : hour < 20 ? "Buenas tardes" : "Buenas noches";
+      $("greeting").textContent = `${greeting}, Nacho`;
+    }
+
+    async function load() {
+      const recordData = await api("/api/records");
+      records = recordData.records || [];
+
+      const financeData = await api(`/api/finance/summary?month=${currentMonth()}`);
+      financeSummary = financeData.summary || {};
+      financeMovements = financeData.movements || [];
+
+      render();
+    }
+
+    function render() {
+      const pending = records.filter((record) => record.type === "tarea" && record.status === "pendiente");
+      const ideas = records.filter((record) => record.type === "idea");
+      const memories = records.filter((record) => record.type === "recuerdo");
+      const today = new Date().toISOString().slice(0, 10);
+      const todayCount = records.filter((record) => safeText(record.created_at).slice(0, 10) === today).length;
+
+      $("incomeTotal").textContent = money.format(financeSummary.income_total || 0);
+      $("expenseTotal").textContent = money.format(financeSummary.expense_total || 0);
+      $("savingTotal").textContent = money.format(financeSummary.saving_total || 0);
+      $("balanceTotal").textContent = money.format(financeSummary.balance || 0);
+
+      $("pendingCount").textContent = pending.length;
+      $("ideasCount").textContent = ideas.length;
+      $("memoriesCount").textContent = memories.length;
+      $("nextTask").textContent = pending.length ? `Proxima tarea: ${safeText(pending[0].title, safeText(pending[0].text, "(sin texto)"))}` : "No tenes tareas pendientes.";
+      $("todaySummary").textContent = `Registros cargados hoy: ${todayCount}. Total en memoria: ${records.length}.`;
+
+      $("pending").innerHTML = pending.length ? pending.slice(0, 3).map((r) => `<li>${escapeHtml(r.title, safeText(r.text, "(sin texto)"))}</li>`).join("") : "<li>No tenes tareas pendientes.</li>";
+      const recentMovement = financeMovements.slice().reverse()[0];
+      $("recentFinance").innerHTML = recentMovement ? `<li><span class="pill">${escapeHtml(recentMovement.kind)}</span> ${money.format(recentMovement.amount || 0)} - ${escapeHtml(recentMovement.note, safeText(recentMovement.category_id, "sin detalle"))}</li>` : "<li>Todavia no hay movimientos financieros.</li>";
+
+      $("records").innerHTML = records.slice().reverse().slice(0, 8).map((record) => `
+        <tr>
+          <td data-label="Tipo">${escapeHtml(record.type, "idea")}</td>
+          <td data-label="Estado">${escapeHtml(record.status, "activo")}</td>
+          <td data-label="Contenido">${escapeHtml(record.text, "(sin texto)")}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="3">Todavia no hay registros.</td></tr>`;
+    }
+
+    function prepareCapture(type) {
+      $("type").value = type;
+      $("text").focus();
+      $("status").textContent = type === "tarea" ? "Escribi la tarea y guardala." : "Escribi la idea y guardala.";
+    }
+
+    async function saveManual() {
+      try {
+        await api("/api/records", { type:$("type").value, text:$("text").value });
+        $("text").value = "";
+        $("status").textContent = "Guardado.";
+        await load();
+      } catch (error) { $("status").textContent = error.message; }
+    }
+
+    async function saveQuick() {
+      try {
+        await api("/api/quick", { text:$("text").value });
+        $("text").value = "";
+        $("status").textContent = "Captura rapida guardada.";
+        await load();
+      } catch (error) { $("status").textContent = error.message; }
+    }
+
+    async function makeBackup() {
+      const data = await api("/api/backup", {});
+      $("status").textContent = `Backup creado: ${data.file}`;
+    }
+
+    setGreeting();
+    load().catch((error) => $("status").textContent = error.message);
+  </script>
+</body>
+</html>

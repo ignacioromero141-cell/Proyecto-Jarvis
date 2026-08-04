@@ -1,0 +1,88 @@
+const $ = (id) => document.getElementById(id);
+
+function jarvisPageUrl(page) {
+  return new URL(page, new URL("./", document.baseURI)).pathname;
+}
+
+function jarvisNavHtml(active = "dashboard") {
+  const itemClass = (name) => name === active ? "nav-item active" : "nav-item";
+  return `
+    <nav class="panel jarvis-nav">
+      <input class="nav-toggle" id="jarvis-nav-toggle" type="checkbox" aria-label="Abrir menu de modulos">
+      <div class="nav-head">
+        <h3>Modulos</h3>
+        <label class="nav-menu-button" for="jarvis-nav-toggle" aria-label="Abrir menu de modulos">
+          <span></span>
+          <span></span>
+          <span></span>
+        </label>
+      </div>
+      <div class="nav-links">
+        <a class="${itemClass("dashboard")}" href="${jarvisPageUrl("index.html")}">Dashboard</a>
+        <a class="${itemClass("finance")}" href="${jarvisPageUrl("finance.html")}">Finanzas</a>
+        <a class="${itemClass("organization")}" href="${jarvisPageUrl("organization.html")}">Organizacion</a>
+        <a class="nav-item soon" href="#calendario">Calendario - futuro</a>
+        <a class="nav-item soon" href="#estudio">Estudio - futuro</a>
+        <a class="nav-item soon" href="#gym">Gym - futuro</a>
+        <a class="nav-item soon" href="#ia">IA - futuro</a>
+        <a class="nav-item soon" href="#configuracion">Configuracion - futuro</a>
+      </div>
+    </nav>
+  `;
+}
+
+function renderJarvisShell() {
+  document.querySelectorAll("[data-jarvis-nav]").forEach((target) => {
+    target.outerHTML = jarvisNavHtml(target.dataset.jarvisNav);
+  });
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined || String(value).trim() === "") return fallback;
+  return String(value);
+}
+
+function escapeHtml(value, fallback = "") {
+  return safeText(value, fallback)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function serverApi(path, body) {
+  const options = body ? { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) } : {};
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(data.error || "Error desconocido");
+  return data;
+}
+
+async function api(path, body) {
+  if (window.JarvisLocalStore) {
+    try {
+      return await window.JarvisLocalStore.handle(path, body);
+    } catch (error) {
+      if (!String(error.message || "").includes("Ruta local no disponible")) throw error;
+    }
+  }
+
+  return serverApi(path, body);
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    const scriptUrl = new URL("service-worker.js", new URL("./", document.baseURI));
+    const scope = new URL("./", document.baseURI).pathname;
+    navigator.serviceWorker.register(scriptUrl, { scope }).catch((error) => {
+      console.warn("No se pudo registrar el service worker de Jarvis.", error);
+    });
+  });
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", renderJarvisShell);
+} else {
+  renderJarvisShell();
+}

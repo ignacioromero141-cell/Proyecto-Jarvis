@@ -1,0 +1,545 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Organizacion</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .organization-page { display:grid; gap:16px; }
+    .tabs { display:flex; flex-wrap:wrap; gap:8px; max-width:100%; padding-bottom:2px; }
+    .tab-button { white-space:nowrap; background:var(--color-bg-secondary); color:var(--text-secondary); border:1px solid var(--border-main); }
+    .tab-button.active { background:var(--color-primary); color:var(--text-main); border-color:rgba(192,132,252,.45); }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:grid; gap:16px; }
+    .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .split { display:grid; grid-template-columns:.9fr 1.1fr; gap:16px; align-items:start; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+    .field { display:grid; gap:6px; color:var(--text-secondary); font-size:14px; }
+    .toolbar { display:grid; grid-template-columns:1fr 160px 160px; gap:10px; align-items:end; }
+    .toolbar.ideas { grid-template-columns:1fr 170px; }
+    .item-list { display:grid; gap:10px; }
+    .record-card { background:var(--color-surface-elevated); border:1px solid var(--border-secondary); border-radius:16px; padding:14px; display:grid; gap:10px; }
+    .record-card.completed { border-color:rgba(34,197,94,.38); }
+    .record-card.overdue { border-color:rgba(239,68,68,.55); }
+    .record-card.soon-due { border-color:rgba(245,158,11,.5); }
+    .record-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; min-width:0; }
+    .record-title { margin:0; font-size:18px; }
+    .record-text { margin:0; color:var(--text-secondary); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .meta-row { display:flex; flex-wrap:wrap; gap:6px; }
+    .pill.success { color:var(--color-success); }
+    .pill.warning { color:var(--color-warning); }
+    .pill.danger { color:var(--color-danger); }
+    .pill.primary { color:var(--color-primary-soft); }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .actions button { padding:9px 10px; }
+    .empty { color:var(--text-tertiary); padding:10px 0; }
+    @media (max-width:980px) {
+      .split { grid-template-columns:1fr; }
+      .grid-4, .grid-3 { grid-template-columns:1fr 1fr; }
+    }
+    @media (max-width:650px) {
+      .grid-4, .grid-3, .form-grid, .toolbar, .toolbar.ideas { grid-template-columns:1fr; }
+      .organization-page, .tab-panel, .split, .item-list, .record-card { min-width:0; max-width:100%; }
+      button, .button-link { min-height:46px; }
+      .tabs { gap:6px; }
+      .tab-button { flex:1 1 calc(50% - 6px); padding:10px 12px; }
+      .record-head { display:grid; }
+      .actions { display:grid; grid-template-columns:1fr; }
+      .actions button { width:100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Modulo Organizacion</p>
+      <h1>Organizacion</h1>
+      <p class="subtitle">Tareas, ideas y recuerdos en un lugar propio, conectados a la misma memoria de Jarvis.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="organization"></div>
+
+    <div class="organization-page">
+      <section class="panel">
+        <div class="tabs" role="tablist" aria-label="Secciones de organizacion">
+          <button class="tab-button active" data-tab="summary" onclick="setTab('summary')">Resumen</button>
+          <button class="tab-button" data-tab="tasks" onclick="setTab('tasks')">Tareas</button>
+          <button class="tab-button" data-tab="ideas" onclick="setTab('ideas')">Ideas</button>
+          <button class="tab-button" data-tab="memories" onclick="setTab('memories')">Recuerdos</button>
+        </div>
+      </section>
+
+      <section id="summary" class="tab-panel active">
+        <div class="panel">
+          <h2>Resumen</h2>
+          <div class="grid-4">
+            <div class="card"><span>Tareas pendientes</span><strong id="pendingCount">0</strong></div>
+            <div class="card"><span>Tareas completadas</span><strong id="completedCount">0</strong></div>
+            <div class="card"><span>Ideas guardadas</span><strong id="ideasCount">0</strong></div>
+            <div class="card"><span>Recuerdos</span><strong id="memoriesCount">0</strong></div>
+          </div>
+        </div>
+
+        <div class="split">
+          <section class="panel">
+            <h2>Acciones rapidas</h2>
+            <div class="grid-3">
+              <button onclick="startNew('tarea')">Nueva tarea</button>
+              <button class="secondary" onclick="startNew('idea')">Nueva idea</button>
+              <button class="light" onclick="startNew('recuerdo')">Nuevo recuerdo</button>
+            </div>
+            <div id="summaryStatus" class="status"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Tareas proximas o importantes</h2>
+            <div id="importantTasks" class="item-list"></div>
+          </section>
+        </div>
+
+        <div class="split">
+          <section class="panel">
+            <h2>Actividad reciente</h2>
+            <div id="recentActivity" class="item-list"></div>
+          </section>
+          <section class="panel">
+            <h2>Ultimos registros</h2>
+            <div id="latestRecords" class="item-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="tasks" class="tab-panel">
+        <div class="split">
+          <section class="panel">
+            <h2 id="taskFormTitle">Nueva tarea</h2>
+            <div class="form-grid">
+              <label class="field">Titulo
+                <input id="taskTitle" type="text" placeholder="Ej: Estudiar integrales">
+              </label>
+              <label class="field">Prioridad
+                <select id="taskPriority">
+                  <option value="">Sin prioridad</option>
+                  <option value="baja">Baja</option>
+                  <option value="media">Media</option>
+                  <option value="alta">Alta</option>
+                </select>
+              </label>
+              <label class="field">Fecha limite
+                <input id="taskDueDate" type="date">
+              </label>
+              <label class="field">Etiquetas
+                <input id="taskTags" type="text" placeholder="facu, analisis">
+              </label>
+            </div>
+            <label class="field" style="margin-top:10px">Descripcion opcional
+              <textarea id="taskDescription" placeholder="Detalles, pasos o contexto"></textarea>
+            </label>
+            <button style="margin-top:10px" onclick="saveTask()">Guardar tarea</button>
+            <button class="light" style="margin-top:10px" onclick="resetTaskForm()">Limpiar</button>
+            <div id="taskStatus" class="status"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Tareas</h2>
+            <div class="toolbar">
+              <label class="field">Buscar
+                <input id="taskSearch" type="search" placeholder="Buscar tarea..." oninput="renderTasks()">
+              </label>
+              <label class="field">Estado
+                <select id="taskFilter" onchange="renderTasks()">
+                  <option value="all">Todas</option>
+                  <option value="pending">Pendientes</option>
+                  <option value="completed">Completadas</option>
+                </select>
+              </label>
+              <label class="field">Orden
+                <select id="taskSort" onchange="renderTasks()">
+                  <option value="priority">Prioridad</option>
+                  <option value="date">Fecha</option>
+                  <option value="recent">Mas recientes</option>
+                </select>
+              </label>
+            </div>
+            <div id="taskList" class="item-list" style="margin-top:12px"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="ideas" class="tab-panel">
+        <div class="split">
+          <section class="panel">
+            <h2 id="ideaFormTitle">Nueva idea</h2>
+            <label class="field">Titulo opcional
+              <input id="ideaTitle" type="text" placeholder="Ej: Modulo Gym">
+            </label>
+            <label class="field" style="margin-top:10px">Contenido
+              <textarea id="ideaText" placeholder="Escribi la idea"></textarea>
+            </label>
+            <label class="field" style="margin-top:10px">Etiquetas
+              <input id="ideaTags" type="text" placeholder="jarvis, proyecto">
+            </label>
+            <button style="margin-top:10px" onclick="saveIdea()">Guardar idea</button>
+            <button class="light" style="margin-top:10px" onclick="resetIdeaForm()">Limpiar</button>
+            <div id="ideaStatus" class="status"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Ideas</h2>
+            <div class="toolbar ideas">
+              <label class="field">Buscar
+                <input id="ideaSearch" type="search" placeholder="Buscar idea..." oninput="renderIdeas()">
+              </label>
+              <label class="field">Orden
+                <select id="ideaSort" onchange="renderIdeas()">
+                  <option value="recent">Mas recientes</option>
+                  <option value="oldest">Mas antiguas</option>
+                </select>
+              </label>
+            </div>
+            <div id="ideaList" class="item-list" style="margin-top:12px"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="memories" class="tab-panel">
+        <div class="split">
+          <section class="panel">
+            <h2 id="memoryFormTitle">Nuevo recuerdo</h2>
+            <label class="field">Contenido
+              <textarea id="memoryText" placeholder="Ej: Promocione Algebra"></textarea>
+            </label>
+            <label class="field" style="margin-top:10px">Etiquetas
+              <input id="memoryTags" type="text" placeholder="facu, logro">
+            </label>
+            <button style="margin-top:10px" onclick="saveMemory()">Guardar recuerdo</button>
+            <button class="light" style="margin-top:10px" onclick="resetMemoryForm()">Limpiar</button>
+            <div id="memoryStatus" class="status"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Recuerdos</h2>
+            <label class="field">Buscar
+              <input id="memorySearch" type="search" placeholder="Buscar recuerdo..." oninput="renderMemories()">
+            </label>
+            <div id="memoryList" class="item-list" style="margin-top:12px"></div>
+          </section>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+
+    let records = [];
+    let editingTaskId = null;
+    let editingIdeaId = null;
+    let editingMemoryId = null;
+
+    function recordTitle(record) {
+      return safeText(record.title, safeText(record.text, "(sin titulo)"));
+    }
+
+    function tagsText(record) {
+      return Array.isArray(record.tags) ? record.tags.join(", ") : safeText(record.tags);
+    }
+
+    function dateText(value) {
+      return safeText(value).slice(0, 10) || "sin fecha";
+    }
+
+    function todayKey() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function isOverdue(record) {
+      return record.type === "tarea" && record.status !== "completada" && safeText(record.due_date) && record.due_date < todayKey();
+    }
+
+    function isSoon(record) {
+      if (record.type !== "tarea" || record.status === "completada" || !safeText(record.due_date)) return false;
+      const today = new Date(todayKey());
+      const due = new Date(record.due_date);
+      const diff = Math.ceil((due - today) / 86400000);
+      return diff >= 0 && diff <= 2;
+    }
+
+    async function loadRecords() {
+      const data = await api("/api/records");
+      records = data.records || [];
+      renderAll();
+    }
+
+    function setTab(tab) {
+      document.querySelectorAll(".tab-button").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+      document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === tab));
+    }
+
+    function startNew(type) {
+      if (type === "tarea") { resetTaskForm(); setTab("tasks"); $("taskTitle").focus(); }
+      if (type === "idea") { resetIdeaForm(); setTab("ideas"); $("ideaText").focus(); }
+      if (type === "recuerdo") { resetMemoryForm(); setTab("memories"); $("memoryText").focus(); }
+    }
+
+    function meta(record) {
+      const parts = [`<span class="pill primary">${escapeHtml(record.type, "idea")}</span>`];
+      if (record.type === "tarea") {
+        const statusClass = record.status === "completada" ? "success" : "warning";
+        parts.push(`<span class="pill ${statusClass}">${escapeHtml(record.status, "pendiente")}</span>`);
+        if (safeText(record.priority)) parts.push(`<span class="pill ${record.priority === "alta" ? "danger" : record.priority === "media" ? "warning" : ""}">${escapeHtml(record.priority)}</span>`);
+        if (safeText(record.due_date)) parts.push(`<span class="pill ${isOverdue(record) ? "danger" : isSoon(record) ? "warning" : ""}">${escapeHtml(record.due_date)}</span>`);
+      }
+      tagsText(record).split(",").map((tag) => tag.trim()).filter(Boolean).forEach((tag) => parts.push(`<span class="pill">${escapeHtml(tag)}</span>`));
+      return `<div class="meta-row">${parts.join("")}</div>`;
+    }
+
+    function miniCard(record) {
+      return `<article class="record-card ${isOverdue(record) ? "overdue" : isSoon(record) ? "soon-due" : ""}">
+        <div class="record-head">
+          <h3 class="record-title">${escapeHtml(recordTitle(record))}</h3>
+          <span class="muted">${escapeHtml(dateText(record.created_at))}</span>
+        </div>
+        <p class="record-text">${escapeHtml(record.description, safeText(record.text))}</p>
+        ${meta(record)}
+      </article>`;
+    }
+
+    function renderSummary() {
+      const tasks = records.filter((record) => record.type === "tarea");
+      const pending = tasks.filter((record) => safeText(record.status, "pendiente") === "pendiente");
+      const completed = tasks.filter((record) => record.status === "completada");
+      const ideas = records.filter((record) => record.type === "idea");
+      const memories = records.filter((record) => record.type === "recuerdo");
+      $("pendingCount").textContent = pending.length;
+      $("completedCount").textContent = completed.length;
+      $("ideasCount").textContent = ideas.length;
+      $("memoriesCount").textContent = memories.length;
+
+      const important = pending.slice().sort(taskCompare).slice(0, 4);
+      $("importantTasks").innerHTML = important.map(miniCard).join("") || `<p class="empty">No tenes tareas pendientes importantes.</p>`;
+      const recent = records.filter((record) => dateText(record.created_at) === todayKey()).slice().reverse().slice(0, 4);
+      $("recentActivity").innerHTML = recent.map(miniCard).join("") || `<p class="empty">Todavia no registraste actividad hoy.</p>`;
+      $("latestRecords").innerHTML = records.slice().reverse().slice(0, 5).map(miniCard).join("") || `<p class="empty">Todavia no hay registros.</p>`;
+    }
+
+    function taskCompare(a, b) {
+      const priority = { alta:0, media:1, baja:2, "":3 };
+      const pa = priority[safeText(a.priority)] ?? 3;
+      const pb = priority[safeText(b.priority)] ?? 3;
+      if (pa !== pb) return pa - pb;
+      const da = safeText(a.due_date, "9999-12-31");
+      const db = safeText(b.due_date, "9999-12-31");
+      return da.localeCompare(db);
+    }
+
+    function taskMatches(record) {
+      const query = $("taskSearch").value.toLowerCase().trim();
+      const filter = $("taskFilter").value;
+      const haystack = [record.title, record.text, record.description, tagsText(record)].join(" ").toLowerCase();
+      if (query && !haystack.includes(query)) return false;
+      if (filter === "pending" && safeText(record.status, "pendiente") !== "pendiente") return false;
+      if (filter === "completed" && record.status !== "completada") return false;
+      return true;
+    }
+
+    function renderTasks() {
+      const sort = $("taskSort").value;
+      let tasks = records.filter((record) => record.type === "tarea" && taskMatches(record));
+      if (sort === "priority") tasks = tasks.sort(taskCompare);
+      if (sort === "date") tasks = tasks.sort((a, b) => safeText(a.due_date, "9999-12-31").localeCompare(safeText(b.due_date, "9999-12-31")));
+      if (sort === "recent") tasks = tasks.sort((a, b) => safeText(b.created_at).localeCompare(safeText(a.created_at)));
+
+      $("taskList").innerHTML = tasks.map((record) => {
+        const completed = record.status === "completada";
+        return `<article class="record-card ${completed ? "completed" : ""} ${isOverdue(record) ? "overdue" : isSoon(record) ? "soon-due" : ""}">
+          <div class="record-head"><h3 class="record-title">${escapeHtml(recordTitle(record))}</h3><span class="muted">${escapeHtml(dateText(record.created_at))}</span></div>
+          <p class="record-text">${escapeHtml(record.description, safeText(record.text))}</p>
+          ${meta(record)}
+          <div class="actions">
+            <button class="${completed ? "light" : "secondary"}" onclick="setTaskStatus('${record.id}', '${completed ? "pendiente" : "completada"}')">${completed ? "Pasar a pendiente" : "Completar"}</button>
+            <button class="light" onclick="editTask('${record.id}')">Editar</button>
+            <button class="danger" onclick="deleteRecord('${record.id}')">Eliminar</button>
+          </div>
+        </article>`;
+      }).join("") || `<p class="empty">No hay tareas con esos filtros.</p>`;
+    }
+
+    function payloadTags(text) {
+      return text.split(",").map((tag) => tag.trim()).filter(Boolean);
+    }
+
+    async function saveTask() {
+      try {
+        const title = $("taskTitle").value.trim();
+        const description = $("taskDescription").value.trim();
+        const payload = {
+          id: editingTaskId,
+          type: "tarea",
+          title,
+          text: title || description,
+          description,
+          priority: $("taskPriority").value,
+          due_date: $("taskDueDate").value,
+          tags: payloadTags($("taskTags").value)
+        };
+        await api(editingTaskId ? "/api/records/update" : "/api/records", payload);
+        $("taskStatus").textContent = editingTaskId ? "Tarea actualizada." : "Tarea creada.";
+        resetTaskForm();
+        await loadRecords();
+      } catch (error) { $("taskStatus").textContent = error.message; }
+    }
+
+    function editTask(id) {
+      const record = records.find((item) => item.id === id);
+      if (!record) return;
+      editingTaskId = id;
+      $("taskFormTitle").textContent = "Editar tarea";
+      $("taskTitle").value = safeText(record.title, safeText(record.text));
+      $("taskDescription").value = safeText(record.description);
+      $("taskPriority").value = safeText(record.priority);
+      $("taskDueDate").value = safeText(record.due_date);
+      $("taskTags").value = tagsText(record);
+      $("taskTitle").focus();
+    }
+
+    function resetTaskForm() {
+      editingTaskId = null;
+      $("taskFormTitle").textContent = "Nueva tarea";
+      ["taskTitle", "taskDescription", "taskDueDate", "taskTags"].forEach((id) => $(id).value = "");
+      $("taskPriority").value = "";
+    }
+
+    async function setTaskStatus(id, status) {
+      await api("/api/records/status", { id, status });
+      await loadRecords();
+    }
+
+    function ideaMatches(record) {
+      const query = $("ideaSearch").value.toLowerCase().trim();
+      const haystack = [record.title, record.text, tagsText(record)].join(" ").toLowerCase();
+      return !query || haystack.includes(query);
+    }
+
+    function renderIdeas() {
+      const sort = $("ideaSort").value;
+      let ideas = records.filter((record) => record.type === "idea" && ideaMatches(record));
+      ideas = ideas.sort((a, b) => sort === "oldest" ? safeText(a.created_at).localeCompare(safeText(b.created_at)) : safeText(b.created_at).localeCompare(safeText(a.created_at)));
+      $("ideaList").innerHTML = ideas.map((record) => `<article class="record-card">
+        <div class="record-head"><h3 class="record-title">${escapeHtml(recordTitle(record))}</h3><span class="muted">${escapeHtml(dateText(record.created_at))}</span></div>
+        <p class="record-text">${escapeHtml(record.text)}</p>
+        ${meta(record)}
+        <div class="actions"><button class="light" onclick="editIdea('${record.id}')">Editar</button><button class="danger" onclick="deleteRecord('${record.id}')">Eliminar</button></div>
+      </article>`).join("") || `<p class="empty">No hay ideas con esa busqueda.</p>`;
+    }
+
+    async function saveIdea() {
+      try {
+        const payload = {
+          id: editingIdeaId,
+          type: "idea",
+          title: $("ideaTitle").value.trim(),
+          text: $("ideaText").value.trim(),
+          tags: payloadTags($("ideaTags").value)
+        };
+        await api(editingIdeaId ? "/api/records/update" : "/api/records", payload);
+        $("ideaStatus").textContent = editingIdeaId ? "Idea actualizada." : "Idea creada.";
+        resetIdeaForm();
+        await loadRecords();
+      } catch (error) { $("ideaStatus").textContent = error.message; }
+    }
+
+    function editIdea(id) {
+      const record = records.find((item) => item.id === id);
+      if (!record) return;
+      editingIdeaId = id;
+      $("ideaFormTitle").textContent = "Editar idea";
+      $("ideaTitle").value = safeText(record.title);
+      $("ideaText").value = safeText(record.text);
+      $("ideaTags").value = tagsText(record);
+      $("ideaText").focus();
+    }
+
+    function resetIdeaForm() {
+      editingIdeaId = null;
+      $("ideaFormTitle").textContent = "Nueva idea";
+      ["ideaTitle", "ideaText", "ideaTags"].forEach((id) => $(id).value = "");
+    }
+
+    function memoryMatches(record) {
+      const query = $("memorySearch").value.toLowerCase().trim();
+      const haystack = [record.text, tagsText(record)].join(" ").toLowerCase();
+      return !query || haystack.includes(query);
+    }
+
+    function renderMemories() {
+      const memories = records.filter((record) => record.type === "recuerdo" && memoryMatches(record)).sort((a, b) => safeText(b.created_at).localeCompare(safeText(a.created_at)));
+      $("memoryList").innerHTML = memories.map((record) => `<article class="record-card">
+        <div class="record-head"><h3 class="record-title">Recuerdo</h3><span class="muted">${escapeHtml(dateText(record.created_at))}</span></div>
+        <p class="record-text">${escapeHtml(record.text)}</p>
+        ${meta(record)}
+        <div class="actions"><button class="light" onclick="editMemory('${record.id}')">Editar</button><button class="danger" onclick="deleteRecord('${record.id}')">Eliminar</button></div>
+      </article>`).join("") || `<p class="empty">No hay recuerdos con esa busqueda.</p>`;
+    }
+
+    async function saveMemory() {
+      try {
+        const payload = {
+          id: editingMemoryId,
+          type: "recuerdo",
+          text: $("memoryText").value.trim(),
+          tags: payloadTags($("memoryTags").value)
+        };
+        await api(editingMemoryId ? "/api/records/update" : "/api/records", payload);
+        $("memoryStatus").textContent = editingMemoryId ? "Recuerdo actualizado." : "Recuerdo creado.";
+        resetMemoryForm();
+        await loadRecords();
+      } catch (error) { $("memoryStatus").textContent = error.message; }
+    }
+
+    function editMemory(id) {
+      const record = records.find((item) => item.id === id);
+      if (!record) return;
+      editingMemoryId = id;
+      $("memoryFormTitle").textContent = "Editar recuerdo";
+      $("memoryText").value = safeText(record.text);
+      $("memoryTags").value = tagsText(record);
+      $("memoryText").focus();
+    }
+
+    function resetMemoryForm() {
+      editingMemoryId = null;
+      $("memoryFormTitle").textContent = "Nuevo recuerdo";
+      ["memoryText", "memoryTags"].forEach((id) => $(id).value = "");
+    }
+
+    async function deleteRecord(id) {
+      if (!confirm("Eliminar este registro?")) return;
+      await api("/api/delete", { id });
+      await loadRecords();
+    }
+
+    function renderAll() {
+      renderSummary();
+      renderTasks();
+      renderIdeas();
+      renderMemories();
+    }
+
+    loadRecords().catch((error) => $("summaryStatus").textContent = error.message);
+  </script>
+</body>
+</html>

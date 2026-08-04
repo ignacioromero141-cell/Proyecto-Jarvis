@@ -1,0 +1,494 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Finanzas</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    h1 { font-size:32px; }
+    .finance-page { display:grid; gap:16px; }
+    .grid { display:grid; gap:10px; }
+    .form-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:10px; }
+    .cards { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
+    .analysis-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; }
+    .target-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
+    .section-title { display:flex; justify-content:space-between; gap:12px; align-items:start; min-width:0; }
+    .section-title p { margin:4px 0 0; }
+    .bar-card { background:var(--color-surface-elevated); border:1px solid var(--border-secondary); border-radius:16px; padding:14px; }
+    .bar-head { display:flex; justify-content:space-between; gap:10px; margin-bottom:8px; color:var(--text-secondary); min-width:0; overflow-wrap:anywhere; }
+    .bar-track { position:relative; height:12px; border-radius:999px; background:var(--color-bg-secondary); overflow:hidden; border:1px solid var(--border-main); }
+    .bar-fill { height:100%; width:0%; border-radius:999px; background:var(--color-primary); transition:width .2s ease; }
+    .bar-marker { position:absolute; top:-3px; width:2px; height:18px; background:var(--text-secondary); opacity:.7; }
+    .status-pill { display:inline-block; margin-top:8px; padding:5px 9px; border-radius:999px; font-size:12px; font-weight:700; background:var(--color-surface-hover); color:var(--text-secondary); }
+    .status-pill.ok { color:var(--color-success); }
+    .status-pill.warn { color:var(--color-warning); }
+    .status-pill.bad { color:var(--color-danger); }
+    .chart-wrap { overflow:hidden; border:1px solid var(--border-secondary); border-radius:16px; background:var(--color-bg-secondary); padding:10px; }
+    canvas { width:100%; max-width:100%; height:260px; display:block; }
+    .comparison-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
+    .comparison-card { background:var(--color-surface-elevated); border:1px solid var(--border-secondary); border-radius:16px; padding:12px; }
+    .comparison-card strong { display:block; margin-top:6px; font-size:20px; }
+    details.panel { padding:0; overflow:hidden; }
+    details.panel > summary { list-style:none; cursor:pointer; padding:16px; color:var(--text-main); font-weight:800; }
+    details.panel > summary::-webkit-details-marker { display:none; }
+    .details-body { padding:0 16px 16px; }
+    .table-wrap { width:100%; max-width:100%; overflow-x:auto; }
+    .summary-list { padding-left:18px; color:var(--text-secondary); }
+    @media (max-width:980px) {
+      .cards, .form-grid, .analysis-grid, .target-grid, .comparison-grid { grid-template-columns:1fr 1fr; }
+    }
+    @media (max-width:650px) {
+      .cards, .form-grid, .analysis-grid, .target-grid, .comparison-grid { grid-template-columns:1fr; }
+      .finance-page, .grid, .bar-card, details.panel { min-width:0; max-width:100%; }
+      .section-title { display:grid; grid-template-columns:1fr; }
+      button, .button-link { width:100%; min-height:46px; }
+      .table-wrap { overflow-x:visible; }
+      canvas { height:230px; }
+      td.actions-cell::before { content:""; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Modulo Finanzas</p>
+      <h1>Finanzas</h1>
+      <p class="subtitle">Movimientos, categorias personalizables, prioridades, objetivos y analisis mensual.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="finance"></div>
+
+    <div class="finance-page">
+      <section class="panel">
+        <div class="section-title">
+          <div>
+            <h2>Mes seleccionado</h2>
+            <p class="muted">Todos los calculos se hacen sobre este mes.</p>
+          </div>
+          <button class="light" onclick="loadFinance()">Actualizar</button>
+        </div>
+        <label class="grid">Mes
+          <input id="month" type="month">
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2>Resumen financiero</h2>
+        <div class="cards">
+          <div class="card income"><span>Ingresos</span><strong id="incomeTotal">$0</strong></div>
+          <div class="card expense"><span>Gastos</span><strong id="expenseTotal">$0</strong></div>
+          <div class="card saving"><span>Ahorro / inversiones</span><strong id="savingTotal">$0</strong></div>
+          <div class="card balance"><span>Balance disponible</span><strong id="balanceTotal">$0</strong></div>
+        </div>
+        <p id="incomeWarning" class="muted"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Agregar movimiento</h2>
+        <div class="form-grid">
+          <label class="grid">Tipo
+            <select id="kind">
+              <option value="expense">Gasto</option>
+              <option value="income">Ingreso</option>
+              <option value="saving">Ahorro / inversion</option>
+            </select>
+          </label>
+          <label class="grid">Categoria
+            <select id="category"></select>
+          </label>
+          <label class="grid">Prioridad
+            <select id="priority"></select>
+          </label>
+          <label class="grid">Monto
+            <input id="amount" type="number" min="0" step="0.01" placeholder="0">
+          </label>
+          <label class="grid">Fecha
+            <input id="date" type="date">
+          </label>
+          <label class="grid">Metodo de pago
+            <input id="paymentMethod" type="text" placeholder="cash, debito, credito...">
+          </label>
+        </div>
+        <label class="grid" style="margin-top:10px">Nota
+          <input id="note" type="text" placeholder="almuerzo, colectivo, libro...">
+        </label>
+        <button style="margin-top:10px" onclick="saveMovement()">Guardar movimiento</button>
+        <div id="status" class="status"></div>
+      </section>
+
+      <details class="panel" open>
+        <summary>Analisis y distribucion</summary>
+        <div class="details-body">
+          <div id="analysisGrid" class="analysis-grid"></div>
+        </div>
+      </details>
+
+      <details class="panel" open>
+        <summary>Objetivos del mes: ideal vs real</summary>
+        <div class="details-body">
+          <p class="muted">Las metas deben sumar 100%. Se guardan localmente en la configuracion de Finanzas.</p>
+          <div class="target-grid">
+            <label class="grid">Ahorro e inversiones %
+              <input id="targetSaving" type="number" min="0" max="100" step="1">
+            </label>
+            <label class="grid">Gastos necesarios %
+              <input id="targetNecessary" type="number" min="0" max="100" step="1">
+            </label>
+            <label class="grid">Salidas / prescindibles %
+              <input id="targetOptional" type="number" min="0" max="100" step="1">
+            </label>
+            <label class="grid">Inversion personal %
+              <input id="targetPersonalInvestment" type="number" min="0" max="100" step="1">
+            </label>
+          </div>
+          <button style="margin-top:10px" onclick="saveTargets()">Guardar objetivos</button>
+          <div id="targetStatus" class="status"></div>
+          <div id="targetsGrid" class="analysis-grid" style="margin-top:12px"></div>
+        </div>
+      </details>
+
+      <details class="panel" open>
+        <summary>Evolucion mensual</summary>
+        <div class="details-body">
+          <p class="muted">Grafico local sin dependencias externas. Funciona sin internet.</p>
+          <div class="chart-wrap">
+            <canvas id="trendChart" width="900" height="280"></canvas>
+          </div>
+        </div>
+      </details>
+
+      <details class="panel" open>
+        <summary>Comparacion con el mes anterior</summary>
+        <div class="details-body">
+          <div id="comparison" class="comparison-grid"></div>
+        </div>
+      </details>
+
+      <section class="panel">
+        <div class="section-title">
+          <div>
+            <h2>Historial de movimientos</h2>
+            <p class="muted">Movimientos del mes seleccionado.</p>
+          </div>
+          <button class="light" onclick="exportCsv()">Exportar movimientos a CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Tipo</th><th>Categoria</th><th>Prioridad</th><th>Monto</th><th>Metodo</th><th>Nota</th><th></th></tr></thead>
+            <tbody id="movements"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+
+    let movements = [];
+    let categories = [];
+    let priorities = [];
+    let summary = null;
+
+    const money = new Intl.NumberFormat("es-AR", { style:"currency", currency:"ARS", maximumFractionDigits:0 });
+
+    function todayDate() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    function monthKey() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function labelById(list, id) {
+      const item = list.find((x) => x.id === id);
+      return item ? item.label : id;
+    }
+
+    function renderOptions() {
+      const kind = $("kind").value;
+      const enabledCategories = categories.filter((c) => c.enabled !== false && c.kind === kind);
+      $("category").innerHTML = enabledCategories.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join("");
+      $("priority").innerHTML = priorities.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`).join("");
+    }
+
+    function statusClass(status) {
+      if (status === "cumplido") return "ok";
+      if (status === "cerca" || status === "bajo") return "warn";
+      return "bad";
+    }
+
+    function barColor(item) {
+      if (item.id === "saving") return "var(--color-investment)";
+      if (item.status === "cumplido") return "var(--color-success)";
+      if (item.status === "cerca" || item.status === "bajo") return "var(--color-warning)";
+      return "var(--color-danger)";
+    }
+
+    function renderSummary() {
+      $("incomeTotal").textContent = money.format(summary?.income_total || 0);
+      $("expenseTotal").textContent = money.format(summary?.expense_total || 0);
+      $("savingTotal").textContent = money.format(summary?.saving_total || 0);
+      $("balanceTotal").textContent = money.format(summary?.balance || 0);
+      $("incomeWarning").textContent = (summary?.income_total || 0) > 0
+        ? ""
+        : "Todavia no hay ingresos registrados este mes. Los porcentajes se muestran en 0% para evitar divisiones por cero.";
+    }
+
+    function renderAnalysis() {
+      const analysis = summary?.analysis || [];
+      $("analysisGrid").innerHTML = analysis.map((item) => `
+        <div class="bar-card">
+          <div class="bar-head"><strong>${escapeHtml(item.label)}</strong><span>${money.format(item.total)} - ${escapeHtml(item.percent)}%</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(item.percent, 100)}%; background:${barColor(item)}"></div></div>
+        </div>
+      `).join("") || "<p class='muted'>Sin datos para analizar.</p>";
+    }
+
+    function renderTargets() {
+      const targets = summary?.targets || {};
+      $("targetSaving").value = targets.saving ?? 30;
+      $("targetNecessary").value = targets.necessary ?? 20;
+      $("targetOptional").value = targets.optional ?? 40;
+      $("targetPersonalInvestment").value = targets.personal_investment ?? 10;
+
+      $("targetsGrid").innerHTML = (summary?.analysis || []).map((item) => {
+        const width = Math.min(item.percent, 120) / 1.2;
+        const marker = Math.min(item.target, 120) / 1.2;
+        return `
+          <div class="bar-card">
+            <div class="bar-head"><strong>${escapeHtml(item.label)}</strong><span>Real ${escapeHtml(item.percent)}% - Objetivo ${escapeHtml(item.target)}%</span></div>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:${width}%; background:${barColor(item)}"></div>
+              <i class="bar-marker" style="left:${marker}%"></i>
+            </div>
+            <span class="status-pill ${statusClass(item.status)}">${escapeHtml(item.status)}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderComparison() {
+      const comparison = summary?.previous_comparison;
+      if (!comparison || !comparison.has_previous) {
+        $("comparison").innerHTML = `<p class="muted">${escapeHtml(comparison?.message, "No hay datos del mes anterior.")}</p>`;
+        return;
+      }
+
+      const items = [
+        ["Ingresos", comparison.income],
+        ["Gastos", comparison.expense],
+        ["Ahorro", comparison.saving],
+        ["Balance", comparison.balance]
+      ];
+
+      $("comparison").innerHTML = items.map(([label, item]) => {
+        const sign = item.difference > 0 ? "+" : "";
+        const percent = item.percent === null || item.percent === undefined ? "" : ` (${sign}${item.percent}%)`;
+        return `<div class="comparison-card"><span class="muted">${escapeHtml(label)}</span><strong>${sign}${money.format(item.difference)}</strong><p class="muted">vs mes anterior${escapeHtml(percent)}</p></div>`;
+      }).join("");
+    }
+
+    function renderMovements() {
+      const month = $("month").value;
+      const visible = movements.filter((movement) => movement.date && movement.date.startsWith(month));
+      $("movements").innerHTML = visible.slice().reverse().map((movement) => `
+        <tr>
+          <td data-label="Fecha">${escapeHtml(movement.date)}</td>
+          <td data-label="Tipo">${escapeHtml(movement.kind)}</td>
+          <td data-label="Categoria">${escapeHtml(labelById(categories, movement.category_id))}</td>
+          <td data-label="Prioridad">${escapeHtml(labelById(priorities, movement.priority))}</td>
+          <td data-label="Monto">${money.format(movement.amount)}</td>
+          <td data-label="Metodo">${escapeHtml(movement.payment_method)}</td>
+          <td data-label="Nota">${escapeHtml(movement.note)}</td>
+          <td data-label="" class="actions-cell"><button class="danger" onclick="deleteMovement('${escapeHtml(movement.id)}')">Borrar</button></td>
+        </tr>
+      `).join("") || `<tr><td colspan="8">Todavia no hay movimientos este mes.</td></tr>`;
+    }
+
+    function drawTrendChart() {
+      const canvas = $("trendChart");
+      const ctx = canvas.getContext("2d");
+      const series = summary?.month_series || [];
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = 42;
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(0, 0, width, height);
+
+      if (!series.length) {
+        ctx.fillStyle = "#94A3B8";
+        ctx.font = "16px Segoe UI";
+        ctx.fillText("Carga movimientos para ver la evolucion mensual.", padding, height / 2);
+        return;
+      }
+
+      const values = series.flatMap((m) => [m.income_total, m.expense_total, m.saving_total, Math.abs(m.balance)]);
+      const maxValue = Math.max(...values, 1);
+      const stepX = series.length <= 1 ? 0 : (width - padding * 2) / (series.length - 1);
+
+      function point(value, index) {
+        return {
+          x: padding + index * stepX,
+          y: height - padding - (Math.abs(value) / maxValue) * (height - padding * 2)
+        };
+      }
+
+      function drawLine(key, color, labelOffset) {
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        series.forEach((month, index) => {
+          const p = point(month[key], index);
+          if (index === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.fillText(key.replace("_total", ""), width - 120, 22 + labelOffset);
+      }
+
+      ctx.strokeStyle = "#334155";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + ((height - padding * 2) * i / 4);
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(width - padding, y);
+        ctx.stroke();
+      }
+
+      ctx.font = "13px Segoe UI";
+      drawLine("income_total", "#22C55E", 0);
+      drawLine("expense_total", "#EF4444", 18);
+      drawLine("saving_total", "#3B82F6", 36);
+      drawLine("balance", "#C084FC", 54);
+
+      ctx.fillStyle = "#94A3B8";
+      series.forEach((month, index) => {
+        const x = padding + index * stepX;
+        ctx.fillText(month.month.slice(5), x - 10, height - 14);
+      });
+    }
+
+    function render() {
+      renderSummary();
+      renderAnalysis();
+      renderTargets();
+      renderComparison();
+      renderMovements();
+      drawTrendChart();
+    }
+
+    async function loadFinance() {
+      const data = await api(`/api/finance/summary?month=${encodeURIComponent($("month").value)}`);
+      movements = data.movements || [];
+      categories = data.categories || [];
+      priorities = data.priorities || [];
+      summary = data.summary;
+      renderOptions();
+      render();
+    }
+
+    async function saveMovement() {
+      try {
+        await api("/api/finance/movements", {
+          kind: $("kind").value,
+          category_id: $("category").value,
+          priority: $("priority").value,
+          amount: Number($("amount").value),
+          date: $("date").value,
+          note: $("note").value,
+          payment_method: $("paymentMethod").value
+        });
+        $("amount").value = "";
+        $("note").value = "";
+        $("status").textContent = "Movimiento guardado.";
+        await loadFinance();
+      } catch (error) {
+        $("status").textContent = error.message;
+      }
+    }
+
+    async function saveTargets() {
+      const payload = {
+        saving: Number($("targetSaving").value),
+        necessary: Number($("targetNecessary").value),
+        optional: Number($("targetOptional").value),
+        personal_investment: Number($("targetPersonalInvestment").value)
+      };
+      const total = payload.saving + payload.necessary + payload.optional + payload.personal_investment;
+      if (total !== 100) {
+        $("targetStatus").textContent = `Las metas deben sumar 100%. Ahora suman ${total}%.`;
+        return;
+      }
+
+      try {
+        await api("/api/finance/targets", payload);
+        $("targetStatus").textContent = "Objetivos guardados.";
+        await loadFinance();
+      } catch (error) {
+        $("targetStatus").textContent = error.message;
+      }
+    }
+
+    async function deleteMovement(id) {
+      if (!confirm("Borrar este movimiento?")) return;
+      await api("/api/finance/delete", { id });
+      await loadFinance();
+    }
+
+    function exportCsv() {
+      const month = $("month").value;
+      const visible = movements.filter((movement) => movement.date && movement.date.startsWith(month));
+      const rows = [["Fecha", "Tipo", "Categoria", "Prioridad", "Monto", "Metodo de pago", "Nota"]];
+      visible.forEach((movement) => {
+        rows.push([
+          movement.date,
+          movement.kind,
+          labelById(categories, movement.category_id),
+          labelById(priorities, movement.priority),
+          movement.amount,
+          movement.payment_method || "",
+          movement.note || ""
+        ]);
+      });
+
+      const csv = rows.map((row) => row.map(csvCell).join(";")).join("\r\n");
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `jarvis-finanzas-${month}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function csvCell(value) {
+      const text = String(value ?? "");
+      return `"${text.replaceAll('"', '""')}"`;
+    }
+
+    $("date").value = todayDate();
+    $("month").value = monthKey();
+    $("kind").addEventListener("change", renderOptions);
+    window.addEventListener("resize", drawTrendChart);
+    loadFinance().catch((error) => $("status").textContent = error.message);
+  </script>
+</body>
+</html>
