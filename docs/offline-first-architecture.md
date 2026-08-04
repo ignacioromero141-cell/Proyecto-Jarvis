@@ -15,7 +15,7 @@ el telefono.
 Hoy el uso desde el celular depende de una direccion como:
 
 ```text
-http://192.168.0.89:8765
+http://IP_DE_TU_NOTEBOOK:8765
 ```
 
 Esa direccion apunta al servidor local PowerShell que corre en la notebook. Si
@@ -208,7 +208,7 @@ Resultado: misma informacion en ambos aparatos.
 Para una primera version simple, usar configuracion manual:
 
 ```text
-http://192.168.0.89:8765
+http://IP_DE_TU_NOTEBOOK:8765
 ```
 
 Pero esa direccion no debe ser necesaria para abrir la app. Solo sirve para

@@ -36,7 +36,7 @@
   <header>
     <div class="hero">
       <p class="eyebrow">Jarvis local</p>
-      <h1 id="greeting">Hola</h1>
+      <h1 id="greeting">Bienvenido</h1>
       <p class="subtitle">Tu centro personal para organizar ideas, tareas, recuerdos y finanzas desde una misma app.</p>
     </div>
   </header>
@@ -124,10 +124,15 @@
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     }
 
+    function configuredDisplayName() {
+      return safeText(localStorage.getItem("jarvis_user_display_name"));
+    }
+
     function setGreeting() {
       const hour = new Date().getHours();
       const greeting = hour < 12 ? "Buenos dias" : hour < 20 ? "Buenas tardes" : "Buenas noches";
-      $("greeting").textContent = `${greeting}, Nacho`;
+      const displayName = configuredDisplayName();
+      $("greeting").textContent = displayName ? `${greeting}, ${displayName}` : "Bienvenido";
     }
 
     async function load() {
