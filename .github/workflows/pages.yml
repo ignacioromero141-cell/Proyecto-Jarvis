@@ -25,10 +25,35 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Jarvis static frontend
+      - name: Prepare Jarvis static frontend
+        shell: bash
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp -R src/web/static/. _site/
+
+          test -f _site/index.html
+          test -f _site/finance.html
+          test -f _site/organization.html
+          test -f _site/manifest.webmanifest
+          test -f _site/service-worker.js
+          test -f _site/jarvis-theme.css
+          test -f _site/jarvis-local-store.js
+          test -f _site/jarvis-shared.js
+          test -f _site/icons/icon-192.png
+          test -f _site/icons/icon-512.png
+          test -f _site/icons/apple-touch-icon.png
+          test -f _site/icons/icon.svg
+          test -f _site/icons/maskable.svg
+          test -f _site/.nojekyll
+
+          echo "Jarvis Pages artifact contents:"
+          find _site -maxdepth 3 -type f | sort
+
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: src/web/static
+          path: _site
           include-hidden-files: true
 
   deploy:
