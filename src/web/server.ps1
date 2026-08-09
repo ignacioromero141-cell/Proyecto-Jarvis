@@ -638,6 +638,7 @@ function Start-JarvisWebServer {
 
     Write-Host ""
     Write-Host "Jarvis web 0.5 esta funcionando." -ForegroundColor Cyan
+    Write-Host "Escuchando en todas las interfaces locales: 0.0.0.0:$Port" -ForegroundColor Cyan
     Write-Host "Abrilo en esta notebook:" -ForegroundColor Cyan
     Write-Host "  http://localhost:$Port"
     Write-Host ""
