@@ -117,7 +117,7 @@ Flujo inicial:
 
 1. En el dispositivo que ya pertenece al Jarvis, abrir
    `Configuracion -> Sincronizacion`.
-2. Generar un codigo de vinculacion.
+2. Generar un codigo corto de vinculacion.
 3. En el dispositivo nuevo, abrir `Configuracion -> Sincronizacion`.
 4. Configurar la URL/IP del peer.
 5. Pegar el codigo y confirmar.
@@ -125,7 +125,12 @@ Flujo inicial:
 7. El nuevo dispositivo adopta el `workspace_id` y la credencial de sync de ese
    Jarvis.
 
-QR queda como mejora futura. La base actual usa codigo manual para evitar
+El codigo actual es numerico, temporal y de un solo uso. Dura 10 minutos. El
+codigo no contiene `workspace_id` ni `sync_secret`; solo sirve para que el
+servidor de la notebook valide la solicitud y entregue la credencial al
+dispositivo que se esta vinculando.
+
+QR queda como mejora futura. La base actual usa codigo manual corto para evitar
 dependencias extra.
 
 ## Autenticacion

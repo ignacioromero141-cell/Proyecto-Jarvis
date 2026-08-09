@@ -1,4 +1,4 @@
-const JARVIS_CACHE = "jarvis-pwa-v12";
+const JARVIS_CACHE = "jarvis-pwa-v13";
 
 const APP_SHELL = [
   "./",

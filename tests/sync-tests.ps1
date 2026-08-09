@@ -52,8 +52,16 @@ $authBadDevice = Test-JarvisSyncAuth -WorkspaceId $identity.workspace_id -Device
 Assert-True (-not $authBadDevice.ok -and $authBadDevice.status -eq 403) "Dispositivo no autorizado no fue rechazado."
 
 $pairing = New-JarvisPairingCode
+Assert-True ($pairing.pairing_code -match "^\d{6}$") "El codigo de vinculacion no es corto/numerico."
 $paired = Complete-JarvisPairing -PairingCode $pairing.pairing_code -DeviceId "pwa-test-device" -DeviceName "Celular test"
 Assert-True (@($paired.linked_devices | Where-Object { $_.device_id -eq "pwa-test-device" }).Count -eq 1) "El dispositivo vinculado no fue registrado."
+try {
+    Complete-JarvisPairing -PairingCode $pairing.pairing_code -DeviceId "pwa-reuse-test" -DeviceName "Reuso test" | Out-Null
+    throw "El codigo de vinculacion pudo reutilizarse."
+}
+catch {
+    Assert-True ($_.Exception.Message -match "No hay un codigo|invalido|expiro") "El reuso del codigo no fallo con un error esperado."
+}
 
 $remoteRecord = [pscustomobject]@{
     id = "record-remote-test"

@@ -133,21 +133,11 @@ function New-JarvisPairingCode {
     param([int]$Minutes = 10)
 
     $identity = Read-JarvisIdentity
-    $token = [guid]::NewGuid().ToString("N")
+    $code = (Get-Random -Minimum 100000 -Maximum 999999).ToString()
     $expiresAt = (Get-Date).AddMinutes($Minutes).ToString("yyyy-MM-ddTHH:mm:ss")
-    $identity | Add-Member -NotePropertyName "pairing_token" -NotePropertyValue $token -Force
+    $identity | Add-Member -NotePropertyName "pairing_code" -NotePropertyValue $code -Force
     $identity | Add-Member -NotePropertyName "pairing_expires_at" -NotePropertyValue $expiresAt -Force
     Write-JarvisIdentity -Identity $identity
-
-    $payload = [pscustomobject]@{
-        workspace_id = $identity.workspace_id
-        workspace_name = $identity.workspace_name
-        pairing_token = $token
-        expires_at = $expiresAt
-    }
-    $json = ConvertTo-Json -InputObject $payload -Compress
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $code = [Convert]::ToBase64String($bytes).TrimEnd("=") -replace "\+", "-" -replace "/", "_"
 
     return [pscustomobject]@{
         pairing_code = $code
@@ -176,21 +166,21 @@ function Complete-JarvisPairing {
     )
 
     $identity = Read-JarvisIdentity
-    $payload = ConvertFrom-JarvisPairingCode -Code $PairingCode
-    if ($payload.workspace_id -ne $identity.workspace_id) {
-        throw "El codigo pertenece a otro workspace."
+    $safeCode = (Get-JarvisSafeText -Value $PairingCode) -replace "\s", ""
+    $storedCode = Get-JarvisSafeText -Value $identity.pairing_code
+    if ([string]::IsNullOrWhiteSpace($storedCode)) {
+        throw "No hay un codigo de vinculacion activo. Genera uno nuevo desde la notebook."
     }
-    $validTemporaryToken = -not [string]::IsNullOrWhiteSpace([string]$identity.pairing_token) -and $payload.pairing_token -eq $identity.pairing_token
-    $validSharedSecret = -not [string]::IsNullOrWhiteSpace([string]$payload.sync_secret) -and $payload.sync_secret -eq $identity.sync_secret
-    if (-not $validTemporaryToken -and -not $validSharedSecret) {
+    if ($safeCode -ne $storedCode) {
         throw "Codigo de vinculacion invalido."
     }
-    if ($validTemporaryToken -and ([datetime]::Parse($identity.pairing_expires_at)) -lt (Get-Date)) {
+    if (([datetime]::Parse($identity.pairing_expires_at)) -lt (Get-Date)) {
         throw "El codigo de vinculacion expiro."
     }
 
     Add-JarvisLinkedDevice -DeviceId $DeviceId -DeviceName $DeviceName | Out-Null
     $identity = Read-JarvisIdentity
+    $identity | Add-Member -NotePropertyName "pairing_code" -NotePropertyValue $null -Force
     $identity | Add-Member -NotePropertyName "pairing_token" -NotePropertyValue $null -Force
     $identity | Add-Member -NotePropertyName "pairing_expires_at" -NotePropertyValue $null -Force
     Write-JarvisIdentity -Identity $identity

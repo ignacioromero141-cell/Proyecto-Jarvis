@@ -92,12 +92,12 @@
             <h3>Crear codigo</h3>
             <p class="muted">Usalo desde el otro dispositivo para incorporarlo a este mismo Jarvis.</p>
             <button onclick="createPairingCode()">Generar codigo</button>
-            <textarea id="pairingCode" class="code-box" readonly placeholder="El codigo aparecera aca"></textarea>
+            <textarea id="pairingCode" class="code-box" readonly placeholder="El codigo corto aparecera aca"></textarea>
           </div>
           <div>
             <h3>Unirse a Jarvis existente</h3>
             <label class="field">Codigo recibido
-              <textarea id="joinCode" class="code-box" placeholder="Pega el codigo de vinculacion"></textarea>
+              <textarea id="joinCode" class="code-box" placeholder="Ej: 482913"></textarea>
             </label>
             <button style="margin-top:10px" onclick="joinWorkspace()">Vincular con Jarvis existente</button>
           </div>
@@ -184,11 +184,16 @@
         const fallback = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(location.origin) ? location.origin : "";
         const baseUrl = normalizeJarvisPeerUrl($("notebookUrl").value, fallback);
         if (!baseUrl) throw new Error("Configura primero la URL/IP de la notebook. Ej: http://192.168.0.89:8765");
-        const response = await fetch(`${baseUrl}/api/sync/pairing/start`, {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body:JSON.stringify({})
-        });
+        let response;
+        try {
+          response = await fetch(`${baseUrl}/api/sync/pairing/start`, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body:JSON.stringify({})
+          });
+        } catch (error) {
+          throw new Error(`No se pudo conectar con la notebook en ${baseUrl}. Verifica que Jarvis este abierto, que ambos dispositivos esten en la misma Wi-Fi y que la URL/IP sea correcta.`);
+        }
         const data = await readJsonResponse(response, `${baseUrl}/api/sync/pairing/start`);
         if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo generar el codigo.");
         const pairing = data.pairing || data;

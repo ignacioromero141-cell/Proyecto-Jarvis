@@ -356,6 +356,14 @@
     }
   }
 
+  function networkErrorMessage(error, url) {
+    const message = String(error?.message || error || "");
+    if (/load failed|failed to fetch|networkerror/i.test(message)) {
+      return `No se pudo conectar con la notebook en ${url}. Verifica que Jarvis este abierto, que ambos dispositivos esten en la misma Wi-Fi y que la URL/IP sea correcta.`;
+    }
+    return message || "No se pudo completar la conexion.";
+  }
+
   function defaultNotebookUrl() {
     if (["localhost", "127.0.0.1"].includes(location.hostname) || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(location.hostname)) {
       return location.origin;
@@ -407,17 +415,22 @@
     const metadataKey = syncMetadataKey(notebookUrl);
     const metadata = await get("metadata", metadataKey);
     const localChanges = (await pendingChanges()).map((change) => ({ ...change, workspace_id:change.workspace_id || workspaceId() }));
-    const response = await fetch(`${notebookUrl}/api/sync/apply`, {
-      method:"POST",
-      headers:authHeaders(),
-      body:JSON.stringify({
-        workspace_id:workspaceId(),
-        device_id:deviceId(),
-        device_name:deviceName(),
-        since:metadata?.last_server_cursor || "",
-        changes:localChanges
-      })
-    });
+    let response;
+    try {
+      response = await fetch(`${notebookUrl}/api/sync/apply`, {
+        method:"POST",
+        headers:authHeaders(),
+        body:JSON.stringify({
+          workspace_id:workspaceId(),
+          device_id:deviceId(),
+          device_name:deviceName(),
+          since:metadata?.last_server_cursor || "",
+          changes:localChanges
+        })
+      });
+    } catch (error) {
+      throw new Error(networkErrorMessage(error, notebookUrl));
+    }
     const data = await readJsonResponse(response, `${notebookUrl}/api/sync/apply`);
     if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo sincronizar.");
 
@@ -451,12 +464,6 @@
     };
   }
 
-  function decodePairingCode(code) {
-    const base64 = String(code || "").trim().replaceAll("-", "+").replaceAll("_", "/");
-    const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
-    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (c) => c.charCodeAt(0))));
-  }
-
   async function createPairingCode() {
     const payload = {
       workspace_id:workspaceId(),
@@ -482,21 +489,27 @@
   async function joinWorkspace(body = {}) {
     const notebookUrl = normalizeNotebookUrl(body.notebook_url || localStorage.getItem(NOTEBOOK_URL_KEY) || defaultNotebookUrl());
     if (!notebookUrl) throw new Error("Configura la URL/IP del dispositivo a vincular.");
-    const payload = decodePairingCode(body.pairing_code);
-    const response = await fetch(`${notebookUrl}/api/sync/pairing/complete`, {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify({
-        pairing_code:body.pairing_code,
-        device_id:deviceId(),
-        device_name:body.device_name || deviceName()
-      })
-    });
+    const pairingCode = String(body.pairing_code || "").replace(/\s/g, "");
+    if (!pairingCode) throw new Error("Ingresa el codigo de vinculacion.");
+    let response;
+    try {
+      response = await fetch(`${notebookUrl}/api/sync/pairing/complete`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({
+          pairing_code:pairingCode,
+          device_id:deviceId(),
+          device_name:body.device_name || deviceName()
+        })
+      });
+    } catch (error) {
+      throw new Error(networkErrorMessage(error, notebookUrl));
+    }
     const data = await readJsonResponse(response, `${notebookUrl}/api/sync/pairing/complete`);
     if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo vincular el dispositivo.");
     setIdentity({
-      workspace_id:data.workspace_id || payload.workspace_id,
-      workspace_name:data.workspace_name || payload.workspace_name,
+      workspace_id:data.workspace_id,
+      workspace_name:data.workspace_name,
       sync_secret:data.sync_secret,
       device_name:body.device_name || deviceName()
     });
