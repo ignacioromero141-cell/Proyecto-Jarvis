@@ -8,6 +8,7 @@ function Initialize-JarvisStorage {
     $script:JarvisDataDirectory = Join-Path $ProjectRoot "data"
     $script:JarvisDataFile = Join-Path $script:JarvisDataDirectory "records.json"
     $script:JarvisDeviceFile = Join-Path $script:JarvisDataDirectory "device-id.txt"
+    $script:JarvisIdentityFile = Join-Path $script:JarvisDataDirectory "identity.json"
     $script:JarvisBackupDirectory = Join-Path $script:JarvisDataDirectory "backups"
 
     if (-not (Test-Path -LiteralPath $script:JarvisDataDirectory)) {
@@ -22,9 +23,40 @@ function Initialize-JarvisStorage {
     if (-not (Test-Path -LiteralPath $script:JarvisDeviceFile)) {
         "notebook-$([guid]::NewGuid().ToString("N"))" | Set-Content -LiteralPath $script:JarvisDeviceFile -Encoding UTF8
     }
+    if (-not (Test-Path -LiteralPath $script:JarvisIdentityFile)) {
+        $deviceId = (Get-Content -LiteralPath $script:JarvisDeviceFile -Raw).Trim()
+        $identity = [pscustomobject]@{
+            workspace_id = "workspace-$([guid]::NewGuid().ToString("N"))"
+            workspace_name = "Mi Jarvis"
+            sync_secret = [guid]::NewGuid().ToString("N")
+            device_id = $deviceId
+            device_name = "Notebook principal"
+            linked_devices = @(
+                [pscustomobject]@{
+                    device_id = $deviceId
+                    device_name = "Notebook principal"
+                    linked_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+                    last_seen_at = $null
+                }
+            )
+            updated_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+        }
+        ConvertTo-Json -InputObject $identity -Depth 8 |
+            Set-Content -LiteralPath $script:JarvisIdentityFile -Encoding UTF8
+    }
 }
 
 function Get-JarvisDeviceId {
+    if ($script:JarvisIdentityFile -and (Test-Path -LiteralPath $script:JarvisIdentityFile)) {
+        try {
+            $identity = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $script:JarvisIdentityFile -Raw)
+            if (-not [string]::IsNullOrWhiteSpace([string]$identity.device_id)) {
+                return ([string]$identity.device_id).Trim()
+            }
+        }
+        catch {}
+    }
+
     if (-not (Test-Path -LiteralPath $script:JarvisDeviceFile)) {
         "notebook-$([guid]::NewGuid().ToString("N"))" | Set-Content -LiteralPath $script:JarvisDeviceFile -Encoding UTF8
     }

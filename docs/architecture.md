@@ -117,6 +117,12 @@ La propuesta completa esta en:
 docs/offline-first-architecture.md
 ```
 
+La implementacion inicial de sincronizacion incremental esta documentada en:
+
+```text
+docs/sync-architecture.md
+```
+
 ## Modulo Finanzas
 
 Finanzas tiene su propio espacio de datos:

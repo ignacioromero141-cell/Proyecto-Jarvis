@@ -144,6 +144,9 @@ function Add-FinanceMovement {
 
     $movements += $movement
     Write-FinanceMovements -Movements $movements -BackupReason "movement-add"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        Add-JarvisSyncChange -Entity "finance_movements" -EntityId $movement.id -Operation "create" -Value $movement | Out-Null
+    }
     return $movement
 }
 
@@ -161,6 +164,9 @@ function Remove-FinanceMovement {
     Set-FinanceMovementProperty -Movement $movement -Name "updated_at" -Value $now
     Update-FinanceMovementSyncMetadata -Movement $movement
     Write-FinanceMovements -Movements $movements -BackupReason "movement-delete"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        Add-JarvisSyncChange -Entity "finance_movements" -EntityId $movement.id -Operation "delete" -Value $movement | Out-Null
+    }
 }
 
 function Get-FinanceTargets {
@@ -207,5 +213,9 @@ function Set-FinanceTargets {
     $settings | Add-Member -NotePropertyName "updated_at" -NotePropertyValue ((Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")) -Force
 
     Write-FinanceSettings -Settings $settings -BackupReason "targets-update"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        $settings | Add-Member -NotePropertyName "id" -NotePropertyValue "main" -Force
+        Add-JarvisSyncChange -Entity "finance_settings" -EntityId "main" -Operation "update" -Value $settings | Out-Null
+    }
     return Get-FinanceTargets
 }

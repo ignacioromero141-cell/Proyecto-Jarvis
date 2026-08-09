@@ -1,7 +1,12 @@
 (function () {
   const DB_NAME = "jarvis-local-first";
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
   const DEVICE_KEY = "jarvis_device_id";
+  const WORKSPACE_KEY = "jarvis_workspace_id";
+  const WORKSPACE_NAME_KEY = "jarvis_workspace_name";
+  const DEVICE_NAME_KEY = "jarvis_device_name";
+  const SYNC_SECRET_KEY = "jarvis_sync_secret";
+  const NOTEBOOK_URL_KEY = "jarvis_notebook_sync_url";
 
   const defaultCategories = [
     { id:"income", label:"Ingreso", kind:"income", color:"#2176ae", enabled:true, sort_order:10 },
@@ -46,6 +51,41 @@
     return id;
   }
 
+  function workspaceId() {
+    let id = localStorage.getItem(WORKSPACE_KEY);
+    if (!id) {
+      id = `workspace-${newId()}`;
+      localStorage.setItem(WORKSPACE_KEY, id);
+    }
+    return id;
+  }
+
+  function workspaceName() {
+    const name = localStorage.getItem(WORKSPACE_NAME_KEY);
+    return name && name.trim() ? name.trim() : "Mi Jarvis";
+  }
+
+  function deviceName() {
+    const name = localStorage.getItem(DEVICE_NAME_KEY);
+    return name && name.trim() ? name.trim() : "Este dispositivo";
+  }
+
+  function syncSecret() {
+    let secret = localStorage.getItem(SYNC_SECRET_KEY);
+    if (!secret) {
+      secret = newId("secret-");
+      localStorage.setItem(SYNC_SECRET_KEY, secret);
+    }
+    return secret;
+  }
+
+  function setIdentity({ workspace_id, workspace_name, sync_secret, device_name } = {}) {
+    if (workspace_id) localStorage.setItem(WORKSPACE_KEY, workspace_id);
+    if (workspace_name) localStorage.setItem(WORKSPACE_NAME_KEY, workspace_name);
+    if (sync_secret) localStorage.setItem(SYNC_SECRET_KEY, sync_secret);
+    if (device_name) localStorage.setItem(DEVICE_NAME_KEY, device_name);
+  }
+
   function openDb() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -57,6 +97,7 @@
         if (!db.objectStoreNames.contains("finance_priorities")) db.createObjectStore("finance_priorities", { keyPath:"id" });
         if (!db.objectStoreNames.contains("finance_settings")) db.createObjectStore("finance_settings", { keyPath:"id" });
         if (!db.objectStoreNames.contains("sync_changes")) db.createObjectStore("sync_changes", { keyPath:"change_id" });
+        if (!db.objectStoreNames.contains("sync_conflicts")) db.createObjectStore("sync_conflicts", { keyPath:"conflict_id" });
         if (!db.objectStoreNames.contains("metadata")) db.createObjectStore("metadata", { keyPath:"key" });
       };
       request.onsuccess = () => resolve(request.result);
@@ -181,10 +222,295 @@
       entity_id:entityId,
       operation,
       value,
+      workspace_id:workspaceId(),
       device_id:deviceId(),
       created_at:nowText(),
       synced_at:null
     });
+  }
+
+  async function pendingChanges() {
+    return (await all("sync_changes")).filter((change) => change.device_id === deviceId() && !change.synced_at);
+  }
+
+  async function markChangesSynced(changeIds) {
+    const syncedAt = nowText();
+    const ids = new Set(Array.isArray(changeIds) ? changeIds : []);
+    for (const change of await all("sync_changes")) {
+      if (!ids.has(change.change_id)) continue;
+      change.synced_at = syncedAt;
+      await put("sync_changes", change);
+    }
+  }
+
+  async function rememberRemoteChange(change) {
+    await put("sync_changes", { ...change, synced_at:nowText() });
+  }
+
+  function dateValue(value, field) {
+    const text = value && value[field] ? String(value[field]) : "";
+    const time = Date.parse(text);
+    return Number.isFinite(time) ? time : 0;
+  }
+
+  function remoteWins(localValue, remoteValue) {
+    const localDeleted = dateValue(localValue, "deleted_at");
+    const remoteDeleted = dateValue(remoteValue, "deleted_at");
+    if (remoteDeleted > localDeleted && remoteDeleted > dateValue(localValue, "updated_at")) return true;
+    return dateValue(remoteValue, "updated_at") > dateValue(localValue, "updated_at");
+  }
+
+  function storeForEntity(entity) {
+    const stores = {
+      records:"records",
+      finance_movements:"finance_movements",
+      finance_categories:"finance_categories",
+      finance_priorities:"finance_priorities",
+      finance_settings:"finance_settings"
+    };
+    return stores[entity] || null;
+  }
+
+  async function addConflict(change, localValue, remoteValue, reason) {
+    const conflict = {
+      conflict_id:newId("conflict-"),
+      entity:change.entity,
+      entity_id:change.entity_id,
+      remote_change_id:change.change_id,
+      reason,
+      local_value:localValue,
+      remote_value:remoteValue,
+      created_at:nowText()
+    };
+    await put("sync_conflicts", conflict);
+    return conflict;
+  }
+
+  async function applyRemoteChange(change) {
+    if (!change || !change.change_id || change.device_id === deviceId()) {
+      return { status:"skipped", reason:"own-or-invalid-change", change_id:change?.change_id || "" };
+    }
+    if (change.workspace_id && change.workspace_id !== workspaceId()) {
+      return { status:"rejected", reason:"workspace-mismatch", change_id:change.change_id };
+    }
+
+    if (await get("sync_changes", change.change_id)) {
+      return { status:"skipped", reason:"already-seen", change_id:change.change_id };
+    }
+
+    const storeName = storeForEntity(change.entity);
+    if (!storeName) {
+      await addConflict(change, null, change.value || {}, "unsupported-entity");
+      await rememberRemoteChange(change);
+      return { status:"conflict", reason:"unsupported-entity", change_id:change.change_id };
+    }
+
+    const remoteValue = { ...(change.value || {}) };
+    if (!remoteValue.id) remoteValue.id = change.entity_id;
+    const localValue = await get(storeName, change.entity_id);
+
+    if (!localValue) {
+      await put(storeName, remoteValue);
+      await rememberRemoteChange(change);
+      return { status:"accepted", reason:"created", change_id:change.change_id };
+    }
+
+    if (remoteWins(localValue, remoteValue)) {
+      await put(storeName, remoteValue);
+      await rememberRemoteChange(change);
+      return { status:"accepted", reason:"updated", change_id:change.change_id };
+    }
+
+    if (dateValue(remoteValue, "updated_at") < dateValue(localValue, "updated_at")) {
+      const conflict = await addConflict(change, localValue, remoteValue, "local-newer-than-remote");
+      await rememberRemoteChange(change);
+      return { status:"conflict", reason:conflict.reason, change_id:change.change_id, conflict_id:conflict.conflict_id };
+    }
+
+    await rememberRemoteChange(change);
+    return { status:"skipped", reason:"duplicate-or-same-version", change_id:change.change_id };
+  }
+
+  function normalizeNotebookUrl(value) {
+    const text = String(value || "").trim().replace(/\/+$/, "");
+    if (!text) return "";
+    return /^https?:\/\//i.test(text) ? text : `http://${text}`;
+  }
+
+  function defaultNotebookUrl() {
+    if (["localhost", "127.0.0.1"].includes(location.hostname) || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(location.hostname)) {
+      return location.origin;
+    }
+    return "";
+  }
+
+  function syncMetadataKey(baseUrl) {
+    return `notebook_sync:${baseUrl}`;
+  }
+
+  async function syncStatus() {
+    await ensureDefaults();
+    const pending = await pendingChanges();
+    const conflicts = await all("sync_conflicts");
+    const notebookUrl = normalizeNotebookUrl(localStorage.getItem(NOTEBOOK_URL_KEY)) || defaultNotebookUrl();
+    const metadata = notebookUrl ? await get("metadata", syncMetadataKey(notebookUrl)) : null;
+    return {
+      ok:true,
+      local_only:true,
+      workspace_id:workspaceId(),
+      workspace_name:workspaceName(),
+      device_id:deviceId(),
+      device_name:deviceName(),
+      pending_total:pending.length,
+      conflict_count:conflicts.length,
+      notebook_url:notebookUrl,
+      last_sync_at:metadata?.last_sync_at || null,
+      last_server_cursor:metadata?.last_server_cursor || null,
+      linked_devices:JSON.parse(localStorage.getItem("jarvis_linked_devices") || "[]")
+    };
+  }
+
+  function authHeaders() {
+    return {
+      "Content-Type":"application/json",
+      "X-Jarvis-Workspace-Id":workspaceId(),
+      "X-Jarvis-Device-Id":deviceId(),
+      "X-Jarvis-Sync-Secret":syncSecret()
+    };
+  }
+
+  async function syncWithNotebook(body = {}) {
+    await ensureDefaults();
+    const notebookUrl = normalizeNotebookUrl(body.notebook_url || localStorage.getItem(NOTEBOOK_URL_KEY) || defaultNotebookUrl());
+    if (!notebookUrl) throw new Error("Configura la URL de la notebook para sincronizar.");
+    localStorage.setItem(NOTEBOOK_URL_KEY, notebookUrl);
+
+    const metadataKey = syncMetadataKey(notebookUrl);
+    const metadata = await get("metadata", metadataKey);
+    const localChanges = (await pendingChanges()).map((change) => ({ ...change, workspace_id:change.workspace_id || workspaceId() }));
+    const response = await fetch(`${notebookUrl}/api/sync/apply`, {
+      method:"POST",
+      headers:authHeaders(),
+      body:JSON.stringify({
+        workspace_id:workspaceId(),
+        device_id:deviceId(),
+        device_name:deviceName(),
+        since:metadata?.last_server_cursor || "",
+        changes:localChanges
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo sincronizar.");
+
+    await markChangesSynced(data.accepted_change_ids || []);
+    const remoteResults = [];
+    for (const change of Array.isArray(data.changes) ? data.changes : []) {
+      remoteResults.push(await applyRemoteChange(change));
+    }
+
+    const completedAt = nowText();
+    await put("metadata", {
+      key:metadataKey,
+      notebook_url:notebookUrl,
+      last_sync_at:completedAt,
+      last_server_cursor:data.generated_at || completedAt,
+      server_device_id:data.device_id || null
+    });
+    if (Array.isArray(data.linked_devices)) {
+      localStorage.setItem("jarvis_linked_devices", JSON.stringify(data.linked_devices));
+    }
+
+    return {
+      ok:true,
+      notebook_url:notebookUrl,
+      sent:localChanges.length,
+      accepted:data.accepted_change_ids?.length || 0,
+      received:Array.isArray(data.changes) ? data.changes.length : 0,
+      remote_results:remoteResults,
+      server_results:data.results || [],
+      status:await syncStatus()
+    };
+  }
+
+  function decodePairingCode(code) {
+    const base64 = String(code || "").trim().replaceAll("-", "+").replaceAll("_", "/");
+    const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (c) => c.charCodeAt(0))));
+  }
+
+  async function createPairingCode() {
+    const payload = {
+      workspace_id:workspaceId(),
+      workspace_name:workspaceName(),
+      sync_secret:syncSecret(),
+      created_by_device_id:deviceId(),
+      created_by_device_name:deviceName(),
+      created_at:nowText()
+    };
+    const json = JSON.stringify(payload);
+    const bytes = new TextEncoder().encode(json);
+    let binary = "";
+    bytes.forEach((byte) => binary += String.fromCharCode(byte));
+    return {
+      ok:true,
+      local_only:true,
+      pairing_code:btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", ""),
+      workspace_id:payload.workspace_id,
+      workspace_name:payload.workspace_name
+    };
+  }
+
+  async function joinWorkspace(body = {}) {
+    const notebookUrl = normalizeNotebookUrl(body.notebook_url || localStorage.getItem(NOTEBOOK_URL_KEY) || defaultNotebookUrl());
+    if (!notebookUrl) throw new Error("Configura la URL/IP del dispositivo a vincular.");
+    const payload = decodePairingCode(body.pairing_code);
+    const response = await fetch(`${notebookUrl}/api/sync/pairing/complete`, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({
+        pairing_code:body.pairing_code,
+        device_id:deviceId(),
+        device_name:body.device_name || deviceName()
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo vincular el dispositivo.");
+    setIdentity({
+      workspace_id:data.workspace_id || payload.workspace_id,
+      workspace_name:data.workspace_name || payload.workspace_name,
+      sync_secret:data.sync_secret,
+      device_name:body.device_name || deviceName()
+    });
+    localStorage.setItem(NOTEBOOK_URL_KEY, notebookUrl);
+    if (Array.isArray(data.linked_devices)) {
+      localStorage.setItem("jarvis_linked_devices", JSON.stringify(data.linked_devices));
+    }
+    return { ok:true, status:await syncStatus() };
+  }
+
+  async function saveSyncSettings(body = {}) {
+    setIdentity({ workspace_name:body.workspace_name, device_name:body.device_name });
+    if (body.notebook_url !== undefined) {
+      localStorage.setItem(NOTEBOOK_URL_KEY, normalizeNotebookUrl(body.notebook_url));
+    }
+    return syncStatus();
+  }
+
+  async function listConflicts() {
+    return { ok:true, conflicts:await all("sync_conflicts") };
+  }
+
+  async function resolveConflict(body = {}) {
+    const conflict = await get("sync_conflicts", body.conflict_id);
+    if (!conflict) throw new Error("No encontre ese conflicto.");
+    const storeName = storeForEntity(conflict.entity);
+    if (!storeName) throw new Error("Entidad no soportada.");
+    if (body.resolution === "remote") {
+      await put(storeName, conflict.remote_value);
+      await track(conflict.entity, conflict.entity_id, "resolve-remote", conflict.remote_value);
+    }
+    await remove("sync_conflicts", body.conflict_id);
+    return listConflicts();
   }
 
   function visible(items) {
@@ -243,6 +569,7 @@
       due_date:String(body.due_date || ""),
       tags:tags(body.tags),
       device_id:deviceId(),
+      workspace_id:workspaceId(),
       revision:1,
       deleted_at:null,
       synced_at:null,
@@ -389,6 +716,7 @@
       payment_method:String(body.payment_method || settings.default_payment_method || "cash"),
       source:"manual",
       device_id:deviceId(),
+      workspace_id:workspaceId(),
       revision:1,
       deleted_at:null,
       synced_at:null,
@@ -422,6 +750,9 @@
       personal_investment:Number(body.personal_investment)
     };
     settings.updated_at = nowText();
+    settings.device_id = deviceId();
+    settings.revision = (Number(settings.revision) || 0) + 1;
+    settings.synced_at = null;
     await put("finance_settings", settings);
     await track("finance_settings", "main", "targets", settings);
     return settings.monthly_targets;
@@ -480,9 +811,30 @@
       const targets = await updateTargets(body || {});
       return { ok:true, local_only:true, targets };
     }
+    if (pathname === "/api/sync/status") {
+      return syncStatus();
+    }
+    if (pathname === "/api/sync/run") {
+      return syncWithNotebook(body || {});
+    }
+    if (pathname === "/api/sync/settings") {
+      return saveSyncSettings(body || {});
+    }
+    if (pathname === "/api/sync/pairing/start") {
+      return createPairingCode();
+    }
+    if (pathname === "/api/sync/pairing/join") {
+      return joinWorkspace(body || {});
+    }
+    if (pathname === "/api/sync/conflicts") {
+      return listConflicts();
+    }
+    if (pathname === "/api/sync/conflicts/resolve") {
+      return resolveConflict(body || {});
+    }
 
     throw new Error("Ruta local no disponible.");
   }
 
-  window.JarvisLocalStore = { handle, deviceId, importNotebookSnapshotIfNeeded };
+  window.JarvisLocalStore = { handle, deviceId, workspaceId, importNotebookSnapshotIfNeeded, syncStatus, syncWithNotebook };
 })();

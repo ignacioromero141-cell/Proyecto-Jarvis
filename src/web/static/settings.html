@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Configuracion</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .settings-page { display:grid; gap:16px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .field { display:grid; gap:6px; color:var(--text-secondary); font-size:14px; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .code-box { width:100%; min-height:92px; word-break:break-all; white-space:pre-wrap; }
+    .conflict-card { display:grid; gap:10px; background:var(--color-surface-elevated); border:1px solid var(--border-secondary); border-radius:16px; padding:14px; }
+    .version-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--color-bg-secondary); color:var(--text-secondary); border:1px solid var(--border-main); border-radius:12px; padding:10px; max-height:260px; overflow:auto; }
+    @media (max-width:760px) {
+      .grid-2, .grid-3, .version-grid { grid-template-columns:1fr; }
+      .actions { display:grid; grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Configuracion</p>
+      <h1>Sincronizacion</h1>
+      <p class="subtitle">Vincula dispositivos de tu mismo Jarvis y sincroniza cambios sin depender de una nube permanente.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="settings"></div>
+
+    <div class="settings-page">
+      <section class="panel">
+        <h2>Identidad</h2>
+        <div class="grid-2">
+          <label class="field">Nombre del Jarvis
+            <input id="workspaceName" type="text" placeholder="Mi Jarvis">
+          </label>
+          <label class="field">Nombre de este dispositivo
+            <input id="deviceName" type="text" placeholder="Notebook principal">
+          </label>
+        </div>
+        <div class="grid-2" style="margin-top:12px">
+          <div class="card"><span>Workspace ID</span><strong id="workspaceId">-</strong></div>
+          <div class="card"><span>Device ID</span><strong id="deviceId">-</strong></div>
+        </div>
+        <div class="actions">
+          <button onclick="saveSettings()">Guardar identidad</button>
+          <button class="light" onclick="loadStatus()">Actualizar estado</button>
+        </div>
+        <div id="identityStatus" class="status"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Conexion</h2>
+        <div class="grid-2">
+          <label class="field">URL/IP para sincronizar
+            <input id="notebookUrl" type="url" placeholder="http://192.168.1.50:8765">
+          </label>
+          <div class="card"><span>Ultima sincronizacion</span><strong id="lastSync">Nunca</strong></div>
+        </div>
+        <div class="grid-3" style="margin-top:12px">
+          <div class="card"><span>Estado</span><strong id="connectionState">Sin probar</strong></div>
+          <div class="card"><span>Cambios pendientes</span><strong id="pendingCount">0</strong></div>
+          <div class="card"><span>Conflictos</span><strong id="conflictCount">0</strong></div>
+        </div>
+        <div class="actions">
+          <button onclick="syncNow()">Sincronizar ahora</button>
+          <button class="light" onclick="saveSettings()">Guardar URL</button>
+        </div>
+        <div id="syncStatus" class="status"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Vincular dispositivo</h2>
+        <div class="grid-2">
+          <div>
+            <h3>Crear codigo</h3>
+            <p class="muted">Usalo desde el otro dispositivo para incorporarlo a este mismo Jarvis.</p>
+            <button onclick="createPairingCode()">Generar codigo</button>
+            <textarea id="pairingCode" class="code-box" readonly placeholder="El codigo aparecera aca"></textarea>
+          </div>
+          <div>
+            <h3>Unirse a Jarvis existente</h3>
+            <label class="field">Codigo recibido
+              <textarea id="joinCode" class="code-box" placeholder="Pega el codigo de vinculacion"></textarea>
+            </label>
+            <button style="margin-top:10px" onclick="joinWorkspace()">Vincular con Jarvis existente</button>
+          </div>
+        </div>
+        <div id="pairingStatus" class="status"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Dispositivos vinculados</h2>
+        <table>
+          <thead><tr><th>Nombre</th><th>Device ID</th><th>Vinculado</th><th>Ultima vez visto</th></tr></thead>
+          <tbody id="devices"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Conflictos pendientes</h2>
+        <div id="conflicts"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    let currentStatus = null;
+
+    function shortId(value) {
+      const text = safeText(value, "-");
+      return text.length > 18 ? `${text.slice(0, 12)}...${text.slice(-6)}` : text;
+    }
+
+    function formatDate(value) {
+      return safeText(value, "Nunca").replace("T", " ");
+    }
+
+    function jsonBlock(value) {
+      return escapeHtml(JSON.stringify(value || {}, null, 2));
+    }
+
+    async function loadStatus() {
+      const data = await api("/api/sync/status");
+      currentStatus = data.status || data;
+      $("workspaceName").value = safeText(currentStatus.workspace_name, "Mi Jarvis");
+      $("deviceName").value = safeText(currentStatus.device_name, "Este dispositivo");
+      $("workspaceId").textContent = shortId(currentStatus.workspace_id);
+      $("deviceId").textContent = shortId(currentStatus.device_id);
+      $("notebookUrl").value = safeText(currentStatus.notebook_url);
+      $("lastSync").textContent = formatDate(currentStatus.last_sync_at);
+      $("pendingCount").textContent = currentStatus.pending_total || currentStatus.legacy_pending_total || 0;
+      $("conflictCount").textContent = currentStatus.conflict_count || 0;
+      $("connectionState").textContent = safeText(currentStatus.notebook_url) ? "Configurado" : "Sin URL";
+      renderDevices(currentStatus.linked_devices || []);
+      await loadConflicts();
+    }
+
+    function renderDevices(devices) {
+      $("devices").innerHTML = devices.length ? devices.map((device) => `
+        <tr>
+          <td data-label="Nombre">${escapeHtml(device.device_name, "Dispositivo")}</td>
+          <td data-label="Device ID">${escapeHtml(shortId(device.device_id))}</td>
+          <td data-label="Vinculado">${escapeHtml(formatDate(device.linked_at))}</td>
+          <td data-label="Ultima vez visto">${escapeHtml(formatDate(device.last_seen_at))}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="4">Todavia no hay dispositivos vinculados conocidos.</td></tr>`;
+    }
+
+    async function saveSettings() {
+      try {
+        const data = await api("/api/sync/settings", {
+          workspace_name:$("workspaceName").value,
+          device_name:$("deviceName").value,
+          notebook_url:$("notebookUrl").value
+        });
+        $("identityStatus").textContent = "Configuracion guardada.";
+        currentStatus = data.status || data;
+        await loadStatus();
+      } catch (error) {
+        $("identityStatus").textContent = error.message;
+      }
+    }
+
+    async function createPairingCode() {
+      try {
+        await saveSettings();
+        const baseUrl = safeText($("notebookUrl").value, location.origin).replace(/\/+$/, "");
+        const response = await fetch(`${baseUrl}/api/sync/pairing/start`, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body:JSON.stringify({})
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo generar el codigo.");
+        const pairing = data.pairing || data;
+        $("pairingCode").value = pairing.pairing_code || "";
+        $("pairingStatus").textContent = "Codigo generado. Pegalo en el otro dispositivo.";
+      } catch (error) {
+        $("pairingStatus").textContent = error.message;
+      }
+    }
+
+    async function joinWorkspace() {
+      try {
+        const data = await api("/api/sync/pairing/join", {
+          notebook_url:$("notebookUrl").value,
+          pairing_code:$("joinCode").value,
+          device_name:$("deviceName").value
+        });
+        $("pairingStatus").textContent = "Dispositivo vinculado.";
+        currentStatus = data.status || data;
+        await loadStatus();
+      } catch (error) {
+        $("pairingStatus").textContent = error.message;
+      }
+    }
+
+    async function syncNow() {
+      try {
+        $("syncStatus").textContent = "Sincronizando...";
+        await saveSettings();
+        const data = await api("/api/sync/run", { notebook_url:$("notebookUrl").value });
+        $("connectionState").textContent = "Conectado";
+        $("syncStatus").textContent = `Sync OK. Enviados: ${data.sent || 0}. Recibidos: ${data.received || 0}.`;
+        await loadStatus();
+      } catch (error) {
+        $("connectionState").textContent = "No disponible";
+        $("syncStatus").textContent = error.message;
+      }
+    }
+
+    async function loadConflicts() {
+      const data = await api("/api/sync/conflicts");
+      const conflicts = data.conflicts || [];
+      $("conflicts").innerHTML = conflicts.length ? conflicts.map((conflict) => `
+        <article class="conflict-card">
+          <div>
+            <span class="pill danger">${escapeHtml(conflict.entity)}</span>
+            <span class="pill">${escapeHtml(conflict.reason)}</span>
+            <span class="muted">${escapeHtml(formatDate(conflict.created_at))}</span>
+          </div>
+          <div class="version-grid">
+            <div>
+              <h3>Version local</h3>
+              <pre>${jsonBlock(conflict.local_value)}</pre>
+            </div>
+            <div>
+              <h3>Version remota</h3>
+              <pre>${jsonBlock(conflict.remote_value)}</pre>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="light" onclick="resolveConflict('${conflict.conflict_id}', 'local')">Conservar local</button>
+            <button onclick="resolveConflict('${conflict.conflict_id}', 'remote')">Aceptar remota</button>
+          </div>
+        </article>
+      `).join("") : `<p class="muted">No hay conflictos pendientes.</p>`;
+    }
+
+    async function resolveConflict(id, resolution) {
+      await api("/api/sync/conflicts/resolve", { conflict_id:id, resolution });
+      await loadStatus();
+    }
+
+    loadStatus().catch((error) => $("syncStatus").textContent = error.message);
+  </script>
+</body>
+</html>

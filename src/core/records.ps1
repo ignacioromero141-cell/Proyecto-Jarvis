@@ -72,6 +72,9 @@ function Add-JarvisRecord {
 
     $records += $record
     Write-JarvisRecords -Records $records -BackupReason "record-add"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        Add-JarvisSyncChange -Entity "records" -EntityId $record.id -Operation "create" -Value $record | Out-Null
+    }
     return $record
 }
 
@@ -206,6 +209,9 @@ function Update-JarvisRecord {
 
     Set-JarvisRecordProperty -Record $record -Name "updated_at" -Value ((Get-Date).ToString("yyyy-MM-ddTHH:mm:ss"))
     Write-JarvisRecords -Records $records -BackupReason "record-update"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        Add-JarvisSyncChange -Entity "records" -EntityId $record.id -Operation "update" -Value $record | Out-Null
+    }
     return $record
 }
 
@@ -230,6 +236,9 @@ function Set-JarvisTaskStatus {
     Set-JarvisRecordProperty -Record $record -Name "updated_at" -Value ((Get-Date).ToString("yyyy-MM-ddTHH:mm:ss"))
     Update-JarvisRecordSyncMetadata -Record $record
     Write-JarvisRecords -Records $records -BackupReason "task-status"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        Add-JarvisSyncChange -Entity "records" -EntityId $record.id -Operation "status" -Value $record | Out-Null
+    }
     return $record
 }
 
@@ -253,6 +262,9 @@ function Remove-JarvisRecord {
     Set-JarvisRecordProperty -Record $record -Name "updated_at" -Value $now
     Update-JarvisRecordSyncMetadata -Record $record
     Write-JarvisRecords -Records $records -BackupReason "record-delete"
+    if (Get-Command Add-JarvisSyncChange -ErrorAction SilentlyContinue) {
+        Add-JarvisSyncChange -Entity "records" -EntityId $record.id -Operation "delete" -Value $record | Out-Null
+    }
 }
 
 function Get-JarvisDashboardSummary {

@@ -56,7 +56,7 @@ function Send-JarvisResponse {
 
     $reason = if ($StatusCode -eq 200) { "OK" } elseif ($StatusCode -eq 404) { "Not Found" } else { "Error" }
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
-    $header = "HTTP/1.1 $StatusCode $reason`r`nContent-Type: $ContentType; charset=utf-8`r`nContent-Length: $($bodyBytes.Length)`r`nConnection: close`r`n`r`n"
+    $header = "HTTP/1.1 $StatusCode $reason`r`nContent-Type: $ContentType; charset=utf-8`r`nContent-Length: $($bodyBytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-Jarvis-Workspace-Id, X-Jarvis-Device-Id, X-Jarvis-Sync-Secret`r`nConnection: close`r`n`r`n"
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
     if (-not (Write-JarvisStream -Stream $Stream -Bytes $headerBytes)) {
         return $false
@@ -94,7 +94,7 @@ function Send-JarvisBinaryFile {
     )
 
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $header = "HTTP/1.1 200 OK`r`nContent-Type: $ContentType`r`nContent-Length: $($bytes.Length)`r`nConnection: close`r`n`r`n"
+    $header = "HTTP/1.1 200 OK`r`nContent-Type: $ContentType`r`nContent-Length: $($bytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-Jarvis-Workspace-Id, X-Jarvis-Device-Id, X-Jarvis-Sync-Secret`r`nConnection: close`r`n`r`n"
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
     if (-not (Write-JarvisStream -Stream $Stream -Bytes $headerBytes)) {
         return $false
@@ -140,6 +140,7 @@ function Read-JarvisRequest {
         method = $parts[0]
         target = $parts[1]
         body = $body
+        headers = $headers
         stream = $stream
     }
 }
@@ -165,6 +166,39 @@ function Get-JarvisQueryValue {
     return $query[$Name]
 }
 
+function Get-JarvisRequestHeader {
+    param(
+        $Request,
+        [string]$Name
+    )
+
+    $key = $Name.ToLowerInvariant()
+    if ($Request.headers -and $Request.headers.ContainsKey($key)) {
+        return $Request.headers[$key]
+    }
+
+    return ""
+}
+
+function Test-JarvisRequestSyncAuth {
+    param(
+        $Request,
+        $Body = $null
+    )
+
+    $workspaceId = Get-JarvisRequestHeader -Request $Request -Name "X-Jarvis-Workspace-Id"
+    $deviceId = Get-JarvisRequestHeader -Request $Request -Name "X-Jarvis-Device-Id"
+    $secret = Get-JarvisRequestHeader -Request $Request -Name "X-Jarvis-Sync-Secret"
+
+    if ($Body) {
+        $workspaceId = Get-JarvisSafeText -Value $workspaceId -Fallback (Get-JarvisSafeText -Value $Body.workspace_id)
+        $deviceId = Get-JarvisSafeText -Value $deviceId -Fallback (Get-JarvisSafeText -Value $Body.device_id)
+        $secret = Get-JarvisSafeText -Value $secret -Fallback (Get-JarvisSafeText -Value $Body.sync_secret)
+    }
+
+    return Test-JarvisSyncAuth -WorkspaceId $workspaceId -DeviceId $deviceId -SyncSecret $secret
+}
+
 function Handle-JarvisPageRoute {
     param(
         $Request,
@@ -183,6 +217,11 @@ function Handle-JarvisPageRoute {
 
     if ($Request.method -eq "GET" -and $Path -eq "/organization") {
         Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\organization.html") -ContentType "text/html"
+        return $true
+    }
+
+    if ($Request.method -eq "GET" -and $Path -eq "/settings") {
+        Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\settings.html") -ContentType "text/html"
         return $true
     }
 
@@ -205,6 +244,7 @@ function Handle-JarvisStaticRoute {
         "/index.html" = @{ file = "index.html"; type = "text/html" }
         "/finance.html" = @{ file = "finance.html"; type = "text/html" }
         "/organization.html" = @{ file = "organization.html"; type = "text/html" }
+        "/settings.html" = @{ file = "settings.html"; type = "text/html" }
         "/service-worker.js" = @{ file = "service-worker.js"; type = "application/javascript" }
         "/jarvis-theme.css" = @{ file = "jarvis-theme.css"; type = "text/css" }
         "/jarvis-local-store.js" = @{ file = "jarvis-local-store.js"; type = "application/javascript" }
@@ -384,6 +424,7 @@ function Get-JarvisBootstrapSnapshot {
         schema_version = 1
         generated_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
         source = "notebook-json"
+        identity = Get-JarvisIdentityPublic
         records = @(Read-JarvisRecords)
         finance = [pscustomobject]@{
             movements = @(Read-FinanceMovements)
@@ -401,6 +442,11 @@ function Handle-JarvisBootstrapApiRoute {
     )
 
     if ($Request.method -eq "GET" -and $Path -eq "/api/bootstrap/export") {
+        $auth = Test-JarvisRequestSyncAuth -Request $Request
+        if (-not $auth.ok) {
+            Send-JarvisJson -Stream $Request.stream -StatusCode $auth.status -Value @{ ok = $false; error = $auth.error }
+            return $true
+        }
         Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; snapshot = (Get-JarvisBootstrapSnapshot) }
         return $true
     }
@@ -419,8 +465,92 @@ function Handle-JarvisSyncApiRoute {
         return $true
     }
 
+    if ($Request.method -eq "POST" -and $Path -eq "/api/sync/settings") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        if (-not [string]::IsNullOrWhiteSpace((Get-JarvisSafeText -Value $body.workspace_name))) {
+            Set-JarvisWorkspaceName -WorkspaceName $body.workspace_name | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace((Get-JarvisSafeText -Value $body.device_name))) {
+            Set-JarvisDeviceName -DeviceName $body.device_name | Out-Null
+        }
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; status = (Get-JarvisSyncStatus) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/sync/pairing/start") {
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; pairing = (New-JarvisPairingCode) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/sync/pairing/complete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        $paired = Complete-JarvisPairing -PairingCode $body.pairing_code -DeviceId $body.device_id -DeviceName (Get-JarvisSafeText -Value $body.device_name -Fallback "Dispositivo vinculado")
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{
+            ok = $true
+            workspace_id = $paired.workspace_id
+            workspace_name = $paired.workspace_name
+            sync_secret = $paired.sync_secret
+            linked_devices = @($paired.linked_devices)
+        }
+        return $true
+    }
+
     if ($Request.method -eq "GET" -and $Path -eq "/api/sync/changes") {
-        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; changes = (Get-JarvisSyncChanges) }
+        $auth = Test-JarvisRequestSyncAuth -Request $Request
+        if (-not $auth.ok) {
+            Send-JarvisJson -Stream $Request.stream -StatusCode $auth.status -Value @{ ok = $false; error = $auth.error }
+            return $true
+        }
+        $since = Get-JarvisQueryValue -Target $Request.target -Name "since"
+        $excludeDeviceId = Get-JarvisQueryValue -Target $Request.target -Name "exclude_device_id"
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{
+            ok = $true
+            device_id = Get-JarvisDeviceId
+            workspace_id = Get-JarvisWorkspaceId
+            generated_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+            changes = @(Get-JarvisSyncChangesSince -Since $since -ExcludeDeviceId $excludeDeviceId)
+        }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/sync/apply") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        $auth = Test-JarvisRequestSyncAuth -Request $Request -Body $body
+        if (-not $auth.ok) {
+            Send-JarvisJson -Stream $Request.stream -StatusCode $auth.status -Value @{ ok = $false; error = $auth.error }
+            return $true
+        }
+        $incomingChanges = @($body.changes)
+        $remoteDeviceId = Get-JarvisSafeText -Value $body.device_id
+        $remoteDeviceName = Get-JarvisSafeText -Value $body.device_name
+        Update-JarvisLinkedDeviceSeen -DeviceId $remoteDeviceId -DeviceName $remoteDeviceName | Out-Null
+        $since = Get-JarvisSafeText -Value $body.since
+        $results = @(Apply-JarvisSyncChanges -Changes $incomingChanges -RemoteDeviceId $remoteDeviceId)
+        $acceptedChangeIds = @($results | Where-Object { @("accepted", "skipped") -contains $_.status } | ForEach-Object { $_.change_id })
+
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{
+            ok = $true
+            device_id = Get-JarvisDeviceId
+            workspace_id = Get-JarvisWorkspaceId
+            generated_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+            accepted_change_ids = $acceptedChangeIds
+            results = $results
+            changes = @(Get-JarvisSyncChangesSince -Since $since -ExcludeDeviceId $remoteDeviceId)
+            linked_devices = @((Read-JarvisIdentity).linked_devices)
+            status = (Get-JarvisSyncStatus)
+        }
+        return $true
+    }
+
+    if ($Request.method -eq "GET" -and $Path -eq "/api/sync/conflicts") {
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; conflicts = @(Read-JarvisSyncConflicts) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/sync/conflicts/resolve") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        $conflicts = Resolve-JarvisSyncConflict -ConflictId $body.conflict_id -Resolution (Get-JarvisSafeText -Value $body.resolution -Fallback "local")
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; conflicts = @($conflicts) }
         return $true
     }
 
@@ -432,6 +562,10 @@ function Handle-JarvisRequest {
 
     $path = ([uri]"http://localhost$($Request.target)").AbsolutePath
     try {
+        if ($Request.method -eq "OPTIONS") {
+            Send-JarvisResponse -Stream $Request.stream -StatusCode 200 -ContentType "text/plain" -Body ""
+            return
+        }
         if (Handle-JarvisStaticRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisPageRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisRecordsApiRoute -Request $Request -Path $path) { return }
@@ -484,15 +618,18 @@ function Start-JarvisWebServer {
 
     Initialize-JarvisStorage -ProjectRoot $ProjectRoot
     Initialize-FinanceStorage -ProjectRoot $ProjectRoot
+    Initialize-JarvisSyncStorage
 
     if ($SmokeTest) {
         $html = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\index.html"), [System.Text.Encoding]::UTF8)
         $financeHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\finance.html"), [System.Text.Encoding]::UTF8)
         $organizationHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\organization.html"), [System.Text.Encoding]::UTF8)
+        $settingsHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\settings.html"), [System.Text.Encoding]::UTF8)
         $records = @(Read-JarvisRecords)
         $bootstrap = Get-JarvisBootstrapSnapshot
         [void](Get-JarvisQuickCapture -Text "tengo que estudiar")
-        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros"
+        $syncStatus = Get-JarvisSyncStatus
+        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Configuracion: $($settingsHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
         return
     }
 

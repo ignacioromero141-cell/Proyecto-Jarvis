@@ -52,6 +52,24 @@ Desde `0.4`, Jarvis empezo a separarse en capas:
 El objetivo es que futuros modulos como Finanzas, Calendario, Estudio o IA se
 puedan agregar sin romper Tareas, Ideas o Recuerdos.
 
+## Sincronizacion local-first
+
+Jarvis mantiene una base de sincronizacion incremental para que cada dispositivo
+pueda trabajar offline y, cuando sea posible, intercambiar cambios con la
+notebook en la misma red local.
+
+La documentacion tecnica esta en:
+
+```text
+docs/sync-architecture.md
+```
+
+La pantalla para usarla desde la app esta en:
+
+```text
+http://localhost:8765/settings
+```
+
 ## Dashboard
 
 El Dashboard ahora funciona como centro de la aplicacion:
