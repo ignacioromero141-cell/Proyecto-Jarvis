@@ -54,9 +54,36 @@ function escapeHtml(value, fallback = "") {
 async function serverApi(path, body) {
   const options = body ? { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) } : {};
   const response = await fetch(path, options);
-  const data = await response.json();
+  const data = await readJsonResponse(response, path);
   if (!response.ok || data.ok === false) throw new Error(data.error || "Error desconocido");
   return data;
+}
+
+async function readJsonResponse(response, label = "endpoint") {
+  const contentType = response.headers.get("Content-Type") || "";
+  const text = await response.text();
+  if (!contentType.includes("application/json")) {
+    const preview = text.trim().slice(0, 80).replace(/\s+/g, " ");
+    throw new Error(`El endpoint ${label} no devolvio JSON. Verifica la URL/IP configurada. Respuesta: ${preview || response.status}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`El endpoint ${label} devolvio JSON invalido.`);
+  }
+}
+
+function normalizeJarvisPeerUrl(value, fallback = "") {
+  const raw = safeText(value, fallback).trim();
+  if (!raw) return "";
+
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  try {
+    return new URL(withProtocol).origin.replace(/\/+$/, "");
+  } catch {
+    throw new Error("La URL/IP de sincronizacion no es valida.");
+  }
 }
 
 async function api(path, body) {

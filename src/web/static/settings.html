@@ -181,13 +181,15 @@
     async function createPairingCode() {
       try {
         await saveSettings();
-        const baseUrl = safeText($("notebookUrl").value, location.origin).replace(/\/+$/, "");
+        const fallback = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(location.origin) ? location.origin : "";
+        const baseUrl = normalizeJarvisPeerUrl($("notebookUrl").value, fallback);
+        if (!baseUrl) throw new Error("Configura primero la URL/IP de la notebook. Ej: http://192.168.0.89:8765");
         const response = await fetch(`${baseUrl}/api/sync/pairing/start`, {
           method:"POST",
           headers:{ "Content-Type":"application/json" },
           body:JSON.stringify({})
         });
-        const data = await response.json();
+        const data = await readJsonResponse(response, `${baseUrl}/api/sync/pairing/start`);
         if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo generar el codigo.");
         const pairing = data.pairing || data;
         $("pairingCode").value = pairing.pairing_code || "";

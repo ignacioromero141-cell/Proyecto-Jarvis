@@ -332,9 +332,28 @@
   }
 
   function normalizeNotebookUrl(value) {
-    const text = String(value || "").trim().replace(/\/+$/, "");
+    const text = String(value || "").trim();
     if (!text) return "";
-    return /^https?:\/\//i.test(text) ? text : `http://${text}`;
+    const withProtocol = /^https?:\/\//i.test(text) ? text : `http://${text}`;
+    try {
+      return new URL(withProtocol).origin.replace(/\/+$/, "");
+    } catch {
+      throw new Error("La URL/IP de sincronizacion no es valida.");
+    }
+  }
+
+  async function readJsonResponse(response, label) {
+    const contentType = response.headers.get("Content-Type") || "";
+    const text = await response.text();
+    if (!contentType.includes("application/json")) {
+      const preview = text.trim().slice(0, 80).replace(/\s+/g, " ");
+      throw new Error(`El endpoint ${label} no devolvio JSON. Verifica la URL/IP configurada. Respuesta: ${preview || response.status}`);
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`El endpoint ${label} devolvio JSON invalido.`);
+    }
   }
 
   function defaultNotebookUrl() {
@@ -399,7 +418,7 @@
         changes:localChanges
       })
     });
-    const data = await response.json();
+    const data = await readJsonResponse(response, `${notebookUrl}/api/sync/apply`);
     if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo sincronizar.");
 
     await markChangesSynced(data.accepted_change_ids || []);
@@ -473,7 +492,7 @@
         device_name:body.device_name || deviceName()
       })
     });
-    const data = await response.json();
+    const data = await readJsonResponse(response, `${notebookUrl}/api/sync/pairing/complete`);
     if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo vincular el dispositivo.");
     setIdentity({
       workspace_id:data.workspace_id || payload.workspace_id,
