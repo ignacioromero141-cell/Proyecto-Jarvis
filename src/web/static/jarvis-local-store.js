@@ -1,6 +1,6 @@
 (function () {
   const DB_NAME = "jarvis-local-first";
-  const DB_VERSION = 3;
+  const DB_VERSION = 4;
   const DEVICE_KEY = "jarvis_device_id";
   const WORKSPACE_KEY = "jarvis_workspace_id";
   const WORKSPACE_NAME_KEY = "jarvis_workspace_name";
@@ -23,6 +23,14 @@
     { id:"necessary", label:"Necesario", description:"Gasto importante para vivir, estudiar, trabajar o cuidar la salud.", color:"#16a34a", sort_order:10 },
     { id:"personal_investment", label:"Inversion personal", description:"Gasto que puede mejorar tu futuro: educacion, libros, cursos, salud, deporte.", color:"#2563eb", sort_order:20 },
     { id:"optional", label:"Prescindible", description:"Gusto o compra que podrias recortar si necesitas ahorrar.", color:"#dc2626", sort_order:30 }
+  ];
+
+  const defaultPaymentMethods = [
+    { id:"cash", label:"Efectivo", enabled:true, built_in:true, sort_order:10, deleted_at:null, created_at:null, updated_at:null },
+    { id:"debit", label:"Debito", enabled:true, built_in:true, sort_order:20, deleted_at:null, created_at:null, updated_at:null },
+    { id:"credit", label:"Credito", enabled:true, built_in:true, sort_order:30, deleted_at:null, created_at:null, updated_at:null },
+    { id:"transfer", label:"Transferencia", enabled:true, built_in:true, sort_order:40, deleted_at:null, created_at:null, updated_at:null },
+    { id:"wallet", label:"Billetera virtual", enabled:true, built_in:true, sort_order:50, deleted_at:null, created_at:null, updated_at:null }
   ];
 
   const defaultSettings = {
@@ -95,6 +103,7 @@
         if (!db.objectStoreNames.contains("finance_movements")) db.createObjectStore("finance_movements", { keyPath:"id" });
         if (!db.objectStoreNames.contains("finance_categories")) db.createObjectStore("finance_categories", { keyPath:"id" });
         if (!db.objectStoreNames.contains("finance_priorities")) db.createObjectStore("finance_priorities", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("finance_payment_methods")) db.createObjectStore("finance_payment_methods", { keyPath:"id" });
         if (!db.objectStoreNames.contains("finance_settings")) db.createObjectStore("finance_settings", { keyPath:"id" });
         if (!db.objectStoreNames.contains("sync_changes")) db.createObjectStore("sync_changes", { keyPath:"change_id" });
         if (!db.objectStoreNames.contains("sync_conflicts")) db.createObjectStore("sync_conflicts", { keyPath:"conflict_id" });
@@ -143,6 +152,11 @@
     const priorities = await all("finance_priorities");
     if (!priorities.length) {
       for (const priority of defaultPriorities) await put("finance_priorities", priority);
+    }
+    const paymentMethods = await all("finance_payment_methods");
+    if (!paymentMethods.length) {
+      const time = nowText();
+      for (const method of defaultPaymentMethods) await put("finance_payment_methods", { ...method, created_at:time, updated_at:time });
     }
     const settings = await get("finance_settings", "main");
     if (!settings) await put("finance_settings", defaultSettings);
@@ -194,6 +208,7 @@
       finance_movements:await importList("finance_movements", snapshot.finance?.movements),
       finance_categories:await importList("finance_categories", snapshot.finance?.categories),
       finance_priorities:await importList("finance_priorities", snapshot.finance?.priorities),
+      finance_payment_methods:await importList("finance_payment_methods", snapshot.finance?.payment_methods),
       finance_settings:0
     };
 
@@ -266,6 +281,7 @@
       finance_movements:"finance_movements",
       finance_categories:"finance_categories",
       finance_priorities:"finance_priorities",
+      finance_payment_methods:"finance_payment_methods",
       finance_settings:"finance_settings"
     };
     return stores[entity] || null;
@@ -549,6 +565,10 @@
     return items.filter((item) => !item.deleted_at);
   }
 
+  function sortedMethods(methods) {
+    return visible(methods).sort((a, b) => (Number(a.sort_order) || 999) - (Number(b.sort_order) || 999) || String(a.label || "").localeCompare(String(b.label || "")));
+  }
+
   function recordsSummary(records) {
     const visibleRecords = visible(records);
     const pending = visibleRecords.filter((r) => r.type === "tarea" && (r.status || "pendiente") === "pendiente");
@@ -735,6 +755,11 @@
     const amount = Number(body.amount);
     if (!amount || amount <= 0) throw new Error("El monto debe ser mayor que cero.");
     const settings = await get("finance_settings", "main") || defaultSettings;
+    const methods = await all("finance_payment_methods");
+    let method = methods.find((item) => item.id === body.payment_method_id && !item.deleted_at);
+    if (!method) method = methods.find((item) => item.id === settings.default_payment_method && !item.deleted_at);
+    const paymentMethodId = method?.id || "";
+    const paymentMethodLabel = method?.label || String(body.payment_method || "Efectivo");
     const time = nowText();
     const movement = {
       id:newId("movement-"),
@@ -745,7 +770,8 @@
       currency:settings.currency || "ARS",
       date:body.date || time.slice(0, 10),
       note:String(body.note || "").trim(),
-      payment_method:String(body.payment_method || settings.default_payment_method || "cash"),
+      payment_method_id:paymentMethodId,
+      payment_method:paymentMethodLabel,
       source:"manual",
       device_id:deviceId(),
       workspace_id:workspaceId(),
@@ -757,6 +783,33 @@
     };
     await put("finance_movements", movement);
     await track("finance_movements", movement.id, "create", movement);
+    return movement;
+  }
+
+  async function updateMovement(body) {
+    await ensureDefaults();
+    const movement = await get("finance_movements", body.id);
+    if (!movement) throw new Error("No encontre ese movimiento.");
+    if (!["income", "expense", "saving"].includes(body.kind)) throw new Error("Tipo invalido. Usa income, expense o saving.");
+    const amount = Number(body.amount);
+    if (!amount || amount <= 0) throw new Error("El monto debe ser mayor que cero.");
+    const methods = await all("finance_payment_methods");
+    const method = methods.find((item) => item.id === body.payment_method_id && !item.deleted_at);
+
+    movement.kind = body.kind;
+    movement.category_id = body.category_id;
+    movement.priority = body.priority;
+    movement.amount = amount;
+    movement.date = body.date || movement.date;
+    movement.note = String(body.note || "").trim();
+    movement.payment_method_id = method?.id || "";
+    movement.payment_method = method?.label || String(body.payment_method || movement.payment_method || "Efectivo");
+    movement.revision = (Number(movement.revision) || 1) + 1;
+    movement.updated_at = nowText();
+    movement.synced_at = null;
+
+    await put("finance_movements", movement);
+    await track("finance_movements", movement.id, "update", movement);
     return movement;
   }
 
@@ -788,6 +841,59 @@
     await put("finance_settings", settings);
     await track("finance_settings", "main", "targets", settings);
     return settings.monthly_targets;
+  }
+
+  async function createPaymentMethod(body) {
+    const label = String(body.label || "").trim();
+    if (!label) throw new Error("Escribi un nombre para el metodo.");
+    const methods = await all("finance_payment_methods");
+    const time = nowText();
+    const method = {
+      id:newId("method-"),
+      label,
+      enabled:true,
+      built_in:false,
+      sort_order:100 + methods.length,
+      deleted_at:null,
+      workspace_id:workspaceId(),
+      device_id:deviceId(),
+      revision:1,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    await put("finance_payment_methods", method);
+    await track("finance_payment_methods", method.id, "create", method);
+    return method;
+  }
+
+  async function updatePaymentMethod(body) {
+    const method = await get("finance_payment_methods", body.id);
+    if (!method) throw new Error("No encontre ese metodo.");
+    if (method.built_in) throw new Error("Los metodos iniciales no se editan desde esta pantalla.");
+    const label = String(body.label || method.label || "").trim();
+    if (!label) throw new Error("El nombre del metodo no puede estar vacio.");
+    method.label = label;
+    method.enabled = body.enabled !== false;
+    method.revision = (Number(method.revision) || 1) + 1;
+    method.updated_at = nowText();
+    method.synced_at = null;
+    await put("finance_payment_methods", method);
+    await track("finance_payment_methods", method.id, "update", method);
+    return method;
+  }
+
+  async function deletePaymentMethod(body) {
+    const method = await get("finance_payment_methods", body.id);
+    if (!method) return;
+    if (method.built_in) throw new Error("Los metodos iniciales no se eliminan.");
+    method.enabled = false;
+    method.deleted_at = nowText();
+    method.updated_at = method.deleted_at;
+    method.revision = (Number(method.revision) || 1) + 1;
+    method.synced_at = null;
+    await put("finance_payment_methods", method);
+    await track("finance_payment_methods", method.id, "delete", method);
   }
 
   async function handle(path, body) {
@@ -827,12 +933,17 @@
       const movements = await all("finance_movements");
       const categories = await all("finance_categories");
       const priorities = await all("finance_priorities");
+      const paymentMethods = sortedMethods(await all("finance_payment_methods"));
       const settings = await get("finance_settings", "main") || defaultSettings;
       const month = url.searchParams.get("month") || monthKey();
-      return { ok:true, local_only:true, movements:visible(movements), categories, priorities, summary:monthlySummary(month, movements, categories, priorities, settings) };
+      return { ok:true, local_only:true, movements:visible(movements), categories, priorities, payment_methods:paymentMethods, summary:monthlySummary(month, movements, categories, priorities, settings) };
     }
     if (pathname === "/api/finance/movements") {
       await createMovement(body || {});
+      return { ok:true, local_only:true, movements:visible(await all("finance_movements")) };
+    }
+    if (pathname === "/api/finance/movements/update") {
+      await updateMovement(body || {});
       return { ok:true, local_only:true, movements:visible(await all("finance_movements")) };
     }
     if (pathname === "/api/finance/delete") {
@@ -842,6 +953,18 @@
     if (pathname === "/api/finance/targets") {
       const targets = await updateTargets(body || {});
       return { ok:true, local_only:true, targets };
+    }
+    if (pathname === "/api/finance/payment-methods") {
+      await createPaymentMethod(body || {});
+      return { ok:true, local_only:true, payment_methods:sortedMethods(await all("finance_payment_methods")) };
+    }
+    if (pathname === "/api/finance/payment-methods/update") {
+      await updatePaymentMethod(body || {});
+      return { ok:true, local_only:true, payment_methods:sortedMethods(await all("finance_payment_methods")) };
+    }
+    if (pathname === "/api/finance/payment-methods/delete") {
+      await deletePaymentMethod(body || {});
+      return { ok:true, local_only:true, payment_methods:sortedMethods(await all("finance_payment_methods")) };
     }
     if (pathname === "/api/sync/status") {
       return syncStatus();

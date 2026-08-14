@@ -45,6 +45,12 @@
     .details-body { padding:0 16px 16px; }
     .table-wrap { width:100%; max-width:100%; overflow-x:auto; }
     .summary-list { padding-left:18px; color:var(--text-secondary); }
+    .method-picker { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .method-chip { width:auto; min-height:42px; padding:10px 12px; background:var(--color-bg-secondary); color:var(--text-secondary); border:1px solid var(--border-secondary); }
+    .method-chip.active { background:var(--color-primary); color:var(--text-main); border-color:rgba(192,132,252,.55); }
+    .method-row { display:grid; grid-template-columns:1fr auto auto auto; gap:8px; align-items:center; padding:10px 0; border-bottom:1px solid var(--divider-subtle); }
+    .method-row:last-child { border-bottom:0; }
+    .method-row button { width:auto; padding:8px 10px; }
     @media (max-width:980px) {
       .cards, .form-grid, .analysis-grid, .target-grid, .comparison-grid { grid-template-columns:1fr 1fr; }
     }
@@ -53,6 +59,9 @@
       .finance-page, .grid, .bar-card, details.panel { min-width:0; max-width:100%; }
       .section-title { display:grid; grid-template-columns:1fr; }
       button, .button-link { width:100%; min-height:46px; }
+      .method-chip { flex:1 1 calc(50% - 8px); width:auto; }
+      .method-row { grid-template-columns:1fr; }
+      .method-row button { width:100%; }
       .table-wrap { overflow-x:visible; }
       canvas { height:230px; }
       td.actions-cell::before { content:""; }
@@ -97,7 +106,7 @@
       </section>
 
       <section class="panel">
-        <h2>Agregar movimiento</h2>
+        <h2 id="movementFormTitle">Agregar movimiento</h2>
         <div class="form-grid">
           <label class="grid">Tipo
             <select id="kind">
@@ -118,16 +127,33 @@
           <label class="grid">Fecha
             <input id="date" type="date">
           </label>
-          <label class="grid">Metodo de pago
-            <input id="paymentMethod" type="text" placeholder="cash, debito, credito...">
-          </label>
+        </div>
+        <div class="grid" style="margin-top:10px">
+          <span id="paymentMethodLabel">Metodo de pago</span>
+          <div id="paymentMethods" class="method-picker"></div>
         </div>
         <label class="grid" style="margin-top:10px">Nota
           <input id="note" type="text" placeholder="almuerzo, colectivo, libro...">
         </label>
-        <button style="margin-top:10px" onclick="saveMovement()">Guardar movimiento</button>
+        <button id="saveMovementButton" style="margin-top:10px" onclick="saveMovement()">Guardar movimiento</button>
+        <button class="light" style="margin-top:10px" onclick="resetMovementForm()">Cancelar edicion</button>
         <div id="status" class="status"></div>
       </section>
+
+      <details class="panel">
+        <summary>Metodos de pago y cobro</summary>
+        <div class="details-body">
+          <p class="muted">Crea metodos personalizados para cargar movimientos rapido desde el celular. Los movimientos anteriores conservan su metodo aunque lo ocultes o elimines.</p>
+          <div class="form-grid">
+            <label class="grid">Nuevo metodo
+              <input id="newPaymentMethod" type="text" placeholder="Mercado Pago, Cuenta DNI...">
+            </label>
+            <button onclick="addPaymentMethod()">Agregar metodo</button>
+          </div>
+          <div id="paymentMethodList" style="margin-top:12px"></div>
+          <div id="methodStatus" class="status"></div>
+        </div>
+      </details>
 
       <details class="panel" open>
         <summary>Analisis y distribucion</summary>
@@ -200,7 +226,10 @@
     let movements = [];
     let categories = [];
     let priorities = [];
+    let paymentMethods = [];
     let summary = null;
+    let selectedPaymentMethodId = "cash";
+    let editingMovementId = null;
 
     const money = new Intl.NumberFormat("es-AR", { style:"currency", currency:"ARS", maximumFractionDigits:0 });
 
@@ -219,11 +248,48 @@
       return item ? item.label : id;
     }
 
+    function activePaymentMethods() {
+      return paymentMethods.filter((method) => method.enabled !== false && !method.deleted_at);
+    }
+
+    function methodLabelForMovement(movement) {
+      return safeText(movement.payment_method, labelById(paymentMethods, movement.payment_method_id));
+    }
+
+    function selectPaymentMethod(id) {
+      selectedPaymentMethodId = id;
+      renderPaymentMethods();
+    }
+
+    function renderPaymentMethods() {
+      const methods = activePaymentMethods();
+      if (!methods.find((method) => method.id === selectedPaymentMethodId)) {
+        selectedPaymentMethodId = methods[0]?.id || "";
+      }
+      $("paymentMethodLabel").textContent = $("kind").value === "income" ? "Metodo de cobro" : "Metodo de pago";
+      $("paymentMethods").innerHTML = methods.map((method) => `
+        <button type="button" class="method-chip ${method.id === selectedPaymentMethodId ? "active" : ""}" onclick="selectPaymentMethod('${escapeHtml(method.id)}')">${escapeHtml(method.label)}</button>
+      `).join("") || `<p class="muted">No hay metodos activos.</p>`;
+    }
+
+    function renderPaymentMethodList() {
+      const custom = paymentMethods.filter((method) => !method.built_in && !method.deleted_at);
+      $("paymentMethodList").innerHTML = custom.map((method) => `
+        <div class="method-row">
+          <input id="methodLabel-${escapeHtml(method.id)}" value="${escapeHtml(method.label)}">
+          <button class="light" onclick="updatePaymentMethod('${escapeHtml(method.id)}', true)">Guardar</button>
+          <button class="light" onclick="updatePaymentMethod('${escapeHtml(method.id)}', ${method.enabled === false ? "true" : "false"})">${method.enabled === false ? "Mostrar" : "Ocultar"}</button>
+          <button class="danger" onclick="deletePaymentMethod('${escapeHtml(method.id)}')">Eliminar</button>
+        </div>
+      `).join("") || `<p class="muted">Todavia no creaste metodos personalizados.</p>`;
+    }
+
     function renderOptions() {
       const kind = $("kind").value;
       const enabledCategories = categories.filter((c) => c.enabled !== false && c.kind === kind);
       $("category").innerHTML = enabledCategories.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join("");
       $("priority").innerHTML = priorities.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`).join("");
+      renderPaymentMethods();
     }
 
     function statusClass(status) {
@@ -313,9 +379,12 @@
           <td data-label="Categoria">${escapeHtml(labelById(categories, movement.category_id))}</td>
           <td data-label="Prioridad">${escapeHtml(labelById(priorities, movement.priority))}</td>
           <td data-label="Monto">${money.format(movement.amount)}</td>
-          <td data-label="Metodo">${escapeHtml(movement.payment_method)}</td>
+          <td data-label="Metodo">${escapeHtml(methodLabelForMovement(movement))}</td>
           <td data-label="Nota">${escapeHtml(movement.note)}</td>
-          <td data-label="" class="actions-cell"><button class="danger" onclick="deleteMovement('${escapeHtml(movement.id)}')">Borrar</button></td>
+          <td data-label="" class="actions-cell">
+            <button class="light" onclick="editMovement('${escapeHtml(movement.id)}')">Editar</button>
+            <button class="danger" onclick="deleteMovement('${escapeHtml(movement.id)}')">Borrar</button>
+          </td>
         </tr>
       `).join("") || `<tr><td colspan="8">Todavia no hay movimientos este mes.</td></tr>`;
     }
@@ -391,6 +460,7 @@
       renderAnalysis();
       renderTargets();
       renderComparison();
+      renderPaymentMethodList();
       renderMovements();
       drawTrendChart();
     }
@@ -400,6 +470,7 @@
       movements = data.movements || [];
       categories = data.categories || [];
       priorities = data.priorities || [];
+      paymentMethods = data.payment_methods || [];
       summary = data.summary;
       renderOptions();
       render();
@@ -407,22 +478,50 @@
 
     async function saveMovement() {
       try {
-        await api("/api/finance/movements", {
+        const wasEditing = Boolean(editingMovementId);
+        await api(editingMovementId ? "/api/finance/movements/update" : "/api/finance/movements", {
+          id: editingMovementId,
           kind: $("kind").value,
           category_id: $("category").value,
           priority: $("priority").value,
           amount: Number($("amount").value),
           date: $("date").value,
           note: $("note").value,
-          payment_method: $("paymentMethod").value
+          payment_method_id: selectedPaymentMethodId
         });
-        $("amount").value = "";
-        $("note").value = "";
-        $("status").textContent = "Movimiento guardado.";
+        resetMovementForm();
+        $("status").textContent = wasEditing ? "Movimiento actualizado." : "Movimiento guardado.";
         await loadFinance();
       } catch (error) {
         $("status").textContent = error.message;
       }
+    }
+
+    function editMovement(id) {
+      const movement = movements.find((item) => item.id === id);
+      if (!movement) return;
+      editingMovementId = id;
+      $("movementFormTitle").textContent = "Editar movimiento";
+      $("saveMovementButton").textContent = "Guardar cambios";
+      $("kind").value = movement.kind;
+      renderOptions();
+      $("category").value = movement.category_id;
+      $("priority").value = movement.priority;
+      $("amount").value = movement.amount;
+      $("date").value = movement.date;
+      $("note").value = safeText(movement.note);
+      selectedPaymentMethodId = movement.payment_method_id || activePaymentMethods().find((method) => method.label === movement.payment_method)?.id || activePaymentMethods()[0]?.id || "";
+      renderPaymentMethods();
+      window.scrollTo({ top:0, behavior:"smooth" });
+    }
+
+    function resetMovementForm() {
+      editingMovementId = null;
+      $("movementFormTitle").textContent = "Agregar movimiento";
+      $("saveMovementButton").textContent = "Guardar movimiento";
+      $("amount").value = "";
+      $("note").value = "";
+      $("date").value = todayDate();
     }
 
     async function saveTargets() {
@@ -447,6 +546,38 @@
       }
     }
 
+    async function addPaymentMethod() {
+      try {
+        await api("/api/finance/payment-methods", { label:$("newPaymentMethod").value });
+        $("newPaymentMethod").value = "";
+        $("methodStatus").textContent = "Metodo agregado.";
+        await loadFinance();
+      } catch (error) {
+        $("methodStatus").textContent = error.message;
+      }
+    }
+
+    async function updatePaymentMethod(id, enabled) {
+      try {
+        await api("/api/finance/payment-methods/update", { id, label:$(`methodLabel-${id}`).value, enabled });
+        $("methodStatus").textContent = "Metodo actualizado.";
+        await loadFinance();
+      } catch (error) {
+        $("methodStatus").textContent = error.message;
+      }
+    }
+
+    async function deletePaymentMethod(id) {
+      if (!confirm("Eliminar este metodo personalizado? Los movimientos anteriores conservaran el texto guardado.")) return;
+      try {
+        await api("/api/finance/payment-methods/delete", { id });
+        $("methodStatus").textContent = "Metodo eliminado.";
+        await loadFinance();
+      } catch (error) {
+        $("methodStatus").textContent = error.message;
+      }
+    }
+
     async function deleteMovement(id) {
       if (!confirm("Borrar este movimiento?")) return;
       await api("/api/finance/delete", { id });
@@ -464,7 +595,7 @@
           labelById(categories, movement.category_id),
           labelById(priorities, movement.priority),
           movement.amount,
-          movement.payment_method || "",
+          methodLabelForMovement(movement),
           movement.note || ""
         ]);
       });

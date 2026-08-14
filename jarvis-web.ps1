@@ -1,6 +1,7 @@
 param(
     [int]$Port = 8765,
-    [switch]$SmokeTest
+    [switch]$SmokeTest,
+    [switch]$Quiet
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,4 +10,4 @@ $ErrorActionPreference = "Stop"
 # La implementacion real vive en src/web/server.ps1 para que el proyecto crezca por modulos.
 . (Join-Path $PSScriptRoot "src\web\server.ps1")
 
-Start-JarvisWebServer -ProjectRoot $PSScriptRoot -Port $Port -SmokeTest:$SmokeTest
+Start-JarvisWebServer -ProjectRoot $PSScriptRoot -Port $Port -SmokeTest:$SmokeTest -Quiet:$Quiet

@@ -10,6 +10,7 @@ function Initialize-FinanceStorage {
     $script:FinanceMovementsFile = Join-Path $script:FinanceDataDirectory "movements.json"
     $script:FinanceCategoriesFile = Join-Path $script:FinanceDataDirectory "categories.json"
     $script:FinancePrioritiesFile = Join-Path $script:FinanceDataDirectory "priorities.json"
+    $script:FinancePaymentMethodsFile = Join-Path $script:FinanceDataDirectory "payment-methods.json"
     $script:FinanceSettingsFile = Join-Path $script:FinanceDataDirectory "settings.json"
 
     if (-not (Test-Path -LiteralPath $script:FinanceDataDirectory)) {
@@ -21,6 +22,21 @@ function Initialize-FinanceStorage {
     if (-not (Test-Path -LiteralPath $script:FinanceMovementsFile)) {
         "[]" | Set-Content -LiteralPath $script:FinanceMovementsFile -Encoding UTF8
     }
+    if (-not (Test-Path -LiteralPath $script:FinancePaymentMethodsFile)) {
+        ConvertTo-Json -InputObject (Get-FinanceDefaultPaymentMethods) -Depth 8 |
+            Set-Content -LiteralPath $script:FinancePaymentMethodsFile -Encoding UTF8
+    }
+}
+
+function Get-FinanceDefaultPaymentMethods {
+    $now = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+    return @(
+        [pscustomobject]@{ id = "cash"; label = "Efectivo"; enabled = $true; built_in = $true; sort_order = 10; deleted_at = $null; created_at = $now; updated_at = $now },
+        [pscustomobject]@{ id = "debit"; label = "Debito"; enabled = $true; built_in = $true; sort_order = 20; deleted_at = $null; created_at = $now; updated_at = $now },
+        [pscustomobject]@{ id = "credit"; label = "Credito"; enabled = $true; built_in = $true; sort_order = 30; deleted_at = $null; created_at = $now; updated_at = $now },
+        [pscustomobject]@{ id = "transfer"; label = "Transferencia"; enabled = $true; built_in = $true; sort_order = 40; deleted_at = $null; created_at = $now; updated_at = $now },
+        [pscustomobject]@{ id = "wallet"; label = "Billetera virtual"; enabled = $true; built_in = $true; sort_order = 50; deleted_at = $null; created_at = $now; updated_at = $now }
+    )
 }
 
 function Read-FinanceJsonArray {
@@ -89,6 +105,27 @@ function Read-FinanceCategories {
 
 function Read-FinancePriorities {
     return Read-FinanceJsonArray -Path $script:FinancePrioritiesFile
+}
+
+function Read-FinancePaymentMethods {
+    return Read-FinanceJsonArray -Path $script:FinancePaymentMethodsFile
+}
+
+function Write-FinancePaymentMethods {
+    param(
+        [array]$PaymentMethods,
+        [string]$BackupReason = "payment-methods-update"
+    )
+
+    if (Test-Path -LiteralPath $script:FinancePaymentMethodsFile) {
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $safeReason = $BackupReason -replace "[^a-zA-Z0-9_-]", "-"
+        $backupFile = Join-Path $script:FinanceBackupDirectory "payment-methods-$safeReason-$timestamp.json"
+        Copy-Item -LiteralPath $script:FinancePaymentMethodsFile -Destination $backupFile
+    }
+
+    ConvertTo-Json -InputObject $PaymentMethods -Depth 8 |
+        Set-Content -LiteralPath $script:FinancePaymentMethodsFile -Encoding UTF8
 }
 
 function Read-FinanceSettings {

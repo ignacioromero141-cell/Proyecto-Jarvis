@@ -379,6 +379,7 @@ function Handle-JarvisFinanceApiRoute {
             movements = @(Get-FinanceVisibleMovements)
             categories = @(Read-FinanceCategories)
             priorities = @(Read-FinancePriorities)
+            payment_methods = @(Get-FinanceVisiblePaymentMethods)
             summary = (Get-FinanceMonthlySummary -Month $month)
         }
         return $true
@@ -393,6 +394,23 @@ function Handle-JarvisFinanceApiRoute {
             -Amount ([decimal]$body.amount) `
             -Date $body.date `
             -Note (Get-FinanceSafeText -Value $body.note) `
+            -PaymentMethodId (Get-FinanceSafeText -Value $body.payment_method_id) `
+            -PaymentMethod (Get-FinanceSafeText -Value $body.payment_method) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; movements = @(Get-FinanceVisibleMovements) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/finance/movements/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-FinanceMovement `
+            -Id $body.id `
+            -Kind $body.kind `
+            -CategoryId $body.category_id `
+            -Priority $body.priority `
+            -Amount ([decimal]$body.amount) `
+            -Date $body.date `
+            -Note (Get-FinanceSafeText -Value $body.note) `
+            -PaymentMethodId (Get-FinanceSafeText -Value $body.payment_method_id) `
             -PaymentMethod (Get-FinanceSafeText -Value $body.payment_method) | Out-Null
         Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; movements = @(Get-FinanceVisibleMovements) }
         return $true
@@ -416,6 +434,27 @@ function Handle-JarvisFinanceApiRoute {
         return $true
     }
 
+    if ($Request.method -eq "POST" -and $Path -eq "/api/finance/payment-methods") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-FinancePaymentMethod -Label (Get-FinanceSafeText -Value $body.label) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; payment_methods = @(Get-FinanceVisiblePaymentMethods) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/finance/payment-methods/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-FinancePaymentMethod -Id $body.id -Label (Get-FinanceSafeText -Value $body.label) -Enabled ([bool]$body.enabled) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; payment_methods = @(Get-FinanceVisiblePaymentMethods) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/finance/payment-methods/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-FinancePaymentMethod -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; payment_methods = @(Get-FinanceVisiblePaymentMethods) }
+        return $true
+    }
+
     return $false
 }
 
@@ -430,6 +469,7 @@ function Get-JarvisBootstrapSnapshot {
             movements = @(Read-FinanceMovements)
             categories = @(Read-FinanceCategories)
             priorities = @(Read-FinancePriorities)
+            payment_methods = @(Read-FinancePaymentMethods)
             settings = Read-FinanceSettings
         }
     }
@@ -613,7 +653,8 @@ function Start-JarvisWebServer {
     param(
         [string]$ProjectRoot,
         [int]$Port = 8765,
-        [switch]$SmokeTest
+        [switch]$SmokeTest,
+        [switch]$Quiet
     )
 
     Initialize-JarvisStorage -ProjectRoot $ProjectRoot
@@ -636,21 +677,23 @@ function Start-JarvisWebServer {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
     $listener.Start()
 
-    Write-Host ""
-    Write-Host "Jarvis web 0.5 esta funcionando." -ForegroundColor Cyan
-    Write-Host "Escuchando en todas las interfaces locales: 0.0.0.0:$Port" -ForegroundColor Cyan
-    Write-Host "Abrilo en esta notebook:" -ForegroundColor Cyan
-    Write-Host "  http://localhost:$Port"
-    Write-Host ""
-    Write-Host "Si tu iPhone esta en la misma red Wi-Fi, proba alguna de estas direcciones:"
-    foreach ($address in Get-JarvisLocalAddresses -Port $Port) {
-        if ($address -ne "http://localhost:$Port") {
-            Write-Host "  $address"
+    if (-not $Quiet) {
+        Write-Host ""
+        Write-Host "Jarvis web 0.5 esta funcionando." -ForegroundColor Cyan
+        Write-Host "Escuchando en todas las interfaces locales: 0.0.0.0:$Port" -ForegroundColor Cyan
+        Write-Host "Abrilo en esta notebook:" -ForegroundColor Cyan
+        Write-Host "  http://localhost:$Port"
+        Write-Host ""
+        Write-Host "Si tu iPhone esta en la misma red Wi-Fi, proba alguna de estas direcciones:"
+        foreach ($address in Get-JarvisLocalAddresses -Port $Port) {
+            if ($address -ne "http://localhost:$Port") {
+                Write-Host "  $address"
+            }
         }
+        Write-Host ""
+        Write-Host "Para cerrar Jarvis web, volve a esta ventana y presiona Ctrl + C."
+        Write-Host ""
     }
-    Write-Host ""
-    Write-Host "Para cerrar Jarvis web, volve a esta ventana y presiona Ctrl + C."
-    Write-Host ""
 
     while ($true) {
         $client = $listener.AcceptTcpClient()
@@ -662,7 +705,9 @@ function Start-JarvisWebServer {
         }
         catch {
             if (-not (Test-JarvisClientDisconnect -ErrorRecord $_)) {
-                Write-Host "Error atendiendo solicitud: $($_.Exception.Message)" -ForegroundColor Yellow
+                if (-not $Quiet) {
+                    Write-Host "Error atendiendo solicitud: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
             }
         }
         finally {

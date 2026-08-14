@@ -378,6 +378,15 @@ function Get-JarvisSyncEntityStore {
                 }
             }
         }
+        "finance_payment_methods" {
+            if (Get-Command Read-FinancePaymentMethods -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "finance_payment_methods"
+                    read = { Read-FinancePaymentMethods }
+                    write = { param($Items) Write-FinancePaymentMethods -PaymentMethods $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
     }
 
     return $null
@@ -427,7 +436,7 @@ function Ensure-JarvisBaselineSyncChanges {
     }
 
     $added = 0
-    $entities = @("records", "finance_movements", "finance_settings")
+    $entities = @("records", "finance_movements", "finance_settings", "finance_payment_methods")
     foreach ($entity in $entities) {
         $store = Get-JarvisSyncEntityStore -Entity $entity
         if (-not $store) { continue }
