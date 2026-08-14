@@ -96,6 +96,7 @@ nav { position:sticky; top:14px; align-self:start; }
 .nav-item:hover { background:var(--color-surface-hover); color:var(--text-main); border-color:var(--border-secondary); }
 .nav-item.active { background:var(--gradient-primary); color:var(--text-main); border-color:rgba(192,132,252,.45); }
 .nav-item.soon { color:var(--text-disabled); }
+.nav-divider { display:block; height:1px; margin:8px 2px 12px; background:var(--divider-subtle); opacity:.65; }
 
 .card {
   min-width:0;
@@ -219,10 +220,11 @@ tr:hover td { background:rgba(39,46,69,.35); }
     transition:max-height .18s ease, opacity .15s ease, margin-top .15s ease;
   }
   .nav-toggle:checked ~ .nav-links {
-    max-height:520px;
+    max-height:760px;
     opacity:1;
     margin-top:10px;
   }
+  .nav-divider { margin:4px 2px; }
   .nav-item {
     margin-bottom:0;
     min-height:44px;

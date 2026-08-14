@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Bienestar</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .area-page { display:grid; gap:16px; }
+    .area-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .area-card { min-height:150px; display:grid; align-content:space-between; gap:12px; }
+    .area-card h2 { margin:0; }
+    .area-card p { margin:0; }
+    @media (max-width:900px) { .area-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Area principal</p>
+      <h1>Bienestar</h1>
+      <p class="subtitle">Entrenamiento, salud y nutrición van a crecer juntos dentro de esta área.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="wellbeing"></div>
+
+    <div class="area-page">
+      <section class="panel">
+        <h2>Bienestar</h2>
+        <p class="muted">Este espacio queda preparado para sumar funciones sin agregar más botones principales.</p>
+      </section>
+
+      <section class="area-grid">
+        <article class="card area-card">
+          <div>
+            <span class="pill">Futuro</span>
+            <h2>Gym / Entrenamiento</h2>
+          </div>
+          <p class="muted">Rutinas, progreso, ejercicios y planificación.</p>
+        </article>
+        <article class="card area-card">
+          <div>
+            <span class="pill">Futuro</span>
+            <h2>Salud</h2>
+          </div>
+          <p class="muted">Seguimiento personal y datos de bienestar.</p>
+        </article>
+        <article class="card area-card">
+          <div>
+            <span class="pill">Futuro</span>
+            <h2>Nutrición</h2>
+          </div>
+          <p class="muted">Alimentación, hábitos y objetivos nutricionales.</p>
+        </article>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

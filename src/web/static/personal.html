@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Personal</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .area-page { display:grid; gap:16px; }
+    .area-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .area-card { min-height:140px; display:grid; align-content:space-between; gap:12px; }
+    .area-card h2 { margin:0; }
+    .area-card p { margin:0; }
+    @media (max-width:800px) { .area-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Area principal</p>
+      <h1>Personal</h1>
+      <p class="subtitle">Viajes, entretenimiento y funciones personales secundarias quedan agrupadas acá.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="personal"></div>
+
+    <div class="area-page">
+      <section class="panel">
+        <h2>Personal</h2>
+        <p class="muted">Base visual preparada para crecer sin llenar la navegación principal.</p>
+      </section>
+
+      <section class="area-grid">
+        <article class="card area-card">
+          <div>
+            <span class="pill">Futuro</span>
+            <h2>Viajes</h2>
+          </div>
+          <p class="muted">Planes, reservas, lugares y pendientes.</p>
+        </article>
+        <article class="card area-card">
+          <div>
+            <span class="pill">Futuro</span>
+            <h2>Entretenimiento</h2>
+          </div>
+          <p class="muted">Listas, ideas y seguimiento personal.</p>
+        </article>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

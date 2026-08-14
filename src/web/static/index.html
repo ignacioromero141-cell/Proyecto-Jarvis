@@ -36,6 +36,7 @@
     .insight-item { border:1px solid var(--border-secondary); border-radius:14px; padding:12px; background:var(--color-surface-elevated); }
     .insight-item.alta { border-color:rgba(239,68,68,.45); }
     .insight-item.media { border-color:rgba(245,158,11,.45); }
+    .assistant-entry { display:flex; justify-content:space-between; align-items:center; gap:14px; }
     @media (max-width:980px) {
       .grid-4, .grid-3, .quick-actions, .content-grid { grid-template-columns:1fr 1fr; }
     }
@@ -43,6 +44,7 @@
       .dashboard, .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid, .top-agenda-grid { min-width:0; max-width:100%; }
       .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid, .top-agenda-grid { grid-template-columns:1fr; }
       .panel-title-row { align-items:flex-start; flex-direction:column; }
+      .assistant-entry { align-items:flex-start; flex-direction:column; }
     }
   </style>
 </head>
@@ -73,6 +75,14 @@
           <div id="insights" class="insight-list"></div>
         </section>
       </div>
+
+      <section class="panel assistant-entry">
+        <div>
+          <h2>Jarvis / IA</h2>
+          <p class="muted">Acceso global preparado para una futura capa de asistencia.</p>
+        </div>
+        <span class="pill">Futuro</span>
+      </section>
 
       <section class="panel">
         <h2>Finanzas del mes</h2>

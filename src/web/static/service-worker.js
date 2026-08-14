@@ -1,4 +1,4 @@
-const JARVIS_CACHE = "jarvis-pwa-v20";
+const JARVIS_CACHE = "jarvis-pwa-v22";
 
 const APP_SHELL = [
   "./",
@@ -7,6 +7,9 @@ const APP_SHELL = [
   "./organization.html",
   "./study.html",
   "./calendar.html",
+  "./wellbeing.html",
+  "./work.html",
+  "./personal.html",
   "./settings.html",
   "./manifest.webmanifest",
   "./jarvis-theme.css",

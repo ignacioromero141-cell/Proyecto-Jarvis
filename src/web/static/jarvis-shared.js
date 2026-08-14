@@ -18,13 +18,16 @@ function jarvisNavHtml(active = "dashboard") {
         </label>
       </div>
       <div class="nav-links">
-        <a class="${itemClass("dashboard")}" href="${jarvisPageUrl("index.html")}">Dashboard</a>
-        <a class="${itemClass("finance")}" href="${jarvisPageUrl("finance.html")}">Finanzas</a>
+        <a class="${itemClass("dashboard")}" href="${jarvisPageUrl("index.html")}">Inicio</a>
+        <span class="nav-divider"></span>
         <a class="${itemClass("organization")}" href="${jarvisPageUrl("organization.html")}">Organizacion</a>
-        <a class="${itemClass("study")}" href="${jarvisPageUrl("study.html")}">Estudio</a>
         <a class="${itemClass("calendar")}" href="${jarvisPageUrl("calendar.html")}">Calendario</a>
-        <a class="nav-item soon" href="#gym">Gym - futuro</a>
-        <a class="nav-item soon" href="#ia">IA - futuro</a>
+        <a class="${itemClass("study")}" href="${jarvisPageUrl("study.html")}">Estudio</a>
+        <a class="${itemClass("finance")}" href="${jarvisPageUrl("finance.html")}">Finanzas</a>
+        <a class="${itemClass("wellbeing")}" href="${jarvisPageUrl("wellbeing.html")}">Bienestar</a>
+        <a class="${itemClass("work")}" href="${jarvisPageUrl("work.html")}">Trabajo</a>
+        <a class="${itemClass("personal")}" href="${jarvisPageUrl("personal.html")}">Personal</a>
+        <span class="nav-divider"></span>
         <a class="${itemClass("settings")}" href="${jarvisPageUrl("settings.html")}">Configuracion</a>
       </div>
     </nav>

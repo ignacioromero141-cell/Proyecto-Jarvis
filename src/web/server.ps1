@@ -234,6 +234,21 @@ function Handle-JarvisPageRoute {
         return $true
     }
 
+    if ($Request.method -eq "GET" -and $Path -eq "/wellbeing") {
+        Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\wellbeing.html") -ContentType "text/html"
+        return $true
+    }
+
+    if ($Request.method -eq "GET" -and $Path -eq "/work") {
+        Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\work.html") -ContentType "text/html"
+        return $true
+    }
+
+    if ($Request.method -eq "GET" -and $Path -eq "/personal") {
+        Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\personal.html") -ContentType "text/html"
+        return $true
+    }
+
     if ($Request.method -eq "GET" -and $Path -eq "/settings") {
         Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\settings.html") -ContentType "text/html"
         return $true
@@ -260,6 +275,9 @@ function Handle-JarvisStaticRoute {
         "/organization.html" = @{ file = "organization.html"; type = "text/html" }
         "/study.html" = @{ file = "study.html"; type = "text/html" }
         "/calendar.html" = @{ file = "calendar.html"; type = "text/html" }
+        "/wellbeing.html" = @{ file = "wellbeing.html"; type = "text/html" }
+        "/work.html" = @{ file = "work.html"; type = "text/html" }
+        "/personal.html" = @{ file = "personal.html"; type = "text/html" }
         "/settings.html" = @{ file = "settings.html"; type = "text/html" }
         "/service-worker.js" = @{ file = "service-worker.js"; type = "application/javascript" }
         "/jarvis-theme.css" = @{ file = "jarvis-theme.css"; type = "text/css" }
@@ -921,11 +939,14 @@ function Start-JarvisWebServer {
         $settingsHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\settings.html"), [System.Text.Encoding]::UTF8)
         $studyHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\study.html"), [System.Text.Encoding]::UTF8)
         $calendarHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\calendar.html"), [System.Text.Encoding]::UTF8)
+        $wellbeingHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\wellbeing.html"), [System.Text.Encoding]::UTF8)
+        $workHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\work.html"), [System.Text.Encoding]::UTF8)
+        $personalHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\personal.html"), [System.Text.Encoding]::UTF8)
         $records = @(Read-JarvisRecords)
         $bootstrap = Get-JarvisBootstrapSnapshot
         [void](Get-JarvisQuickCapture -Text "tengo que estudiar")
         $syncStatus = Get-JarvisSyncStatus
-        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Estudio: $($studyHtml.Length) Calendario: $($calendarHtml.Length) Configuracion: $($settingsHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
+        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Estudio: $($studyHtml.Length) Calendario: $($calendarHtml.Length) Bienestar: $($wellbeingHtml.Length) Trabajo: $($workHtml.Length) Personal: $($personalHtml.Length) Configuracion: $($settingsHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
         return
     }
 
