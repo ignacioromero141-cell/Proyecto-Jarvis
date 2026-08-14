@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Calendario</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .calendar-page { display:grid; gap:16px; }
+    .calendar-shell { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:16px; align-items:start; }
+    .calendar-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+    .calendar-title { margin:0; text-transform:capitalize; }
+    .calendar-nav { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .calendar-nav button { width:auto; min-height:38px; padding:8px 12px; }
+    .weekday-grid, .month-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
+    .weekday { color:var(--text-tertiary); font-size:.82rem; font-weight:800; text-align:center; padding:2px 0 6px; }
+    .calendar-cell { width:100%; min-height:118px; display:flex; flex-direction:column; gap:6px; align-items:stretch; justify-content:flex-start; text-align:left; padding:8px; border:1px solid var(--border-secondary); border-radius:12px; background:var(--color-bg-secondary); color:var(--text-main); overflow:hidden; }
+    .calendar-cell:hover { border-color:rgba(192,132,252,.5); transform:none; }
+    .calendar-cell.outside-month { opacity:.45; }
+    .calendar-cell.today { border-color:rgba(139,92,246,.9); box-shadow:inset 0 0 0 1px rgba(139,92,246,.45); }
+    .calendar-cell.selected { background:rgba(139,92,246,.18); border-color:rgba(192,132,252,.9); }
+    .day-number { display:flex; justify-content:space-between; align-items:center; font-size:.85rem; font-weight:800; }
+    .event-chip-list { display:grid; gap:4px; min-width:0; }
+    .calendar-event-chip { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-left:3px solid var(--event-color, #8B5CF6); border-radius:6px; padding:3px 5px; background:rgba(255,255,255,.055); color:var(--text-main); font-size:.74rem; line-height:1.2; }
+    .more-events { color:var(--text-tertiary); font-size:.72rem; font-weight:700; }
+    .selected-day-panel { position:sticky; top:14px; }
+    .selected-day-list { display:grid; gap:10px; margin:12px 0; }
+    .day-event-card { border:1px solid var(--border-secondary); border-radius:14px; padding:12px; background:var(--color-surface-elevated); }
+    .day-event-card.alta { border-color:rgba(239,68,68,.45); }
+    .day-event-card.media { border-color:rgba(245,158,11,.45); }
+    .calendar-layout { display:grid; grid-template-columns:340px minmax(0,1fr); gap:16px; align-items:start; margin-top:12px; }
+    .compact-form { display:grid; gap:10px; }
+    .row-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .row-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .event-list { display:grid; gap:10px; }
+    .event-row { display:grid; grid-template-columns:120px minmax(0,1fr); gap:10px; border:1px solid var(--border-secondary); border-radius:14px; padding:12px; background:var(--color-surface); }
+    .event-edit { display:grid; gap:8px; }
+    .mini-actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .mini-actions button { width:auto; min-height:38px; padding:8px 10px; }
+    .event-admin summary { cursor:pointer; font-weight:800; color:var(--text-main); }
+    @media (max-width:1080px) {
+      .calendar-shell { grid-template-columns:1fr; }
+      .selected-day-panel { position:static; }
+    }
+    @media (max-width:900px) {
+      .calendar-layout, .row-2, .row-3, .event-row { grid-template-columns:1fr; }
+      .mini-actions button { width:100%; }
+    }
+    @media (max-width:650px) {
+      .calendar-toolbar { align-items:flex-start; flex-direction:column; }
+      .calendar-nav { width:100%; display:grid; grid-template-columns:1fr 1fr 1fr; }
+      .calendar-nav button { width:100%; }
+      .weekday-grid, .month-grid { gap:4px; }
+      .weekday { font-size:.72rem; }
+      .calendar-cell { min-height:76px; padding:6px; border-radius:10px; }
+      .calendar-event-chip { font-size:.66rem; padding:2px 4px; }
+      .day-number { font-size:.76rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Jarvis calendario</p>
+      <h1>Calendario</h1>
+      <p class="subtitle">Fechas academicas, eventos personales, entregas y recordatorios conectados al resto de Jarvis.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="calendar"></div>
+
+    <div class="calendar-page">
+      <section class="panel">
+        <div class="row-3">
+          <div class="card"><span>Proximos 7 dias</span><strong id="weekCount">0</strong></div>
+          <div class="card"><span>Academicos</span><strong id="academicCount">0</strong></div>
+          <div class="card"><span>Total visible</span><strong id="eventCount">0</strong></div>
+        </div>
+      </section>
+
+      <div class="calendar-shell">
+        <section class="panel">
+          <div class="calendar-toolbar">
+            <h2 id="monthTitle" class="calendar-title">Calendario</h2>
+            <div class="calendar-nav">
+              <button class="secondary" onclick="moveMonth(-1)">Anterior</button>
+              <button class="light" onclick="goToday()">Hoy</button>
+              <button class="secondary" onclick="moveMonth(1)">Siguiente</button>
+            </div>
+          </div>
+          <div class="weekday-grid" id="weekdayGrid"></div>
+          <div class="month-grid" id="monthGrid"></div>
+        </section>
+
+        <aside class="panel selected-day-panel">
+          <h2 id="selectedDayTitle">Día seleccionado</h2>
+          <p id="selectedDaySummary" class="muted"></p>
+          <div id="selectedDayEvents" class="selected-day-list"></div>
+          <button onclick="prepareEventForSelectedDay()">Agregar evento</button>
+        </aside>
+      </div>
+
+      <details id="eventAdmin" class="panel event-admin">
+        <summary>Agenda y administración de eventos</summary>
+        <div class="calendar-layout">
+          <aside>
+            <h2>Crear evento</h2>
+            <div class="compact-form">
+              <input id="eventTitle" placeholder="Titulo">
+              <div class="row-2">
+                <select id="eventType">
+                  <option value="recordatorio">Recordatorio</option>
+                  <option value="clase">Clase</option>
+                  <option value="parcial">Parcial</option>
+                  <option value="final">Final</option>
+                  <option value="tp">TP</option>
+                  <option value="entrega">Entrega</option>
+                  <option value="exposicion">Exposicion</option>
+                  <option value="personal">Personal</option>
+                  <option value="trabajo">Trabajo</option>
+                  <option value="cumpleanos">Cumpleaños</option>
+                </select>
+                <select id="eventImportance">
+                  <option value="media">Media</option>
+                  <option value="alta">Alta</option>
+                  <option value="baja">Baja</option>
+                </select>
+              </div>
+              <div class="row-2">
+                <input id="eventDate" type="date">
+                <input id="eventTime" type="time">
+              </div>
+              <select id="eventSubject"></select>
+              <textarea id="eventNotes" placeholder="Notas"></textarea>
+              <button onclick="addEvent()">Agregar evento</button>
+            </div>
+            <div id="status" class="status"></div>
+          </aside>
+
+          <section>
+            <h2>Eventos</h2>
+            <div id="eventList" class="event-list"></div>
+          </section>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <script>
+    let events = [];
+    let study = { subjects:[], evaluations:[], assignments:[] };
+    let viewDate = new Date();
+    viewDate.setDate(1);
+    let selectedDateKey = toDateKey(new Date());
+    const weekDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+    const academicTypes = new Set(["clase", "parcial", "final", "tp", "entrega", "exposicion"]);
+    const eventTypes = [
+      ["recordatorio", "Recordatorio"],
+      ["clase", "Clase"],
+      ["parcial", "Parcial"],
+      ["final", "Final"],
+      ["tp", "TP"],
+      ["entrega", "Entrega"],
+      ["exposicion", "Exposicion"],
+      ["personal", "Personal"],
+      ["trabajo", "Trabajo"],
+      ["cumpleanos", "Cumpleaños"]
+    ];
+    const monthFormatter = new Intl.DateTimeFormat("es-AR", { month:"long", year:"numeric" });
+    const longDateFormatter = new Intl.DateTimeFormat("es-AR", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+
+    function visible(items) {
+      return (items || []).filter((item) => !safeText(item.deleted_at));
+    }
+
+    function pad(value) {
+      return String(value).padStart(2, "0");
+    }
+
+    function toDateKey(date) {
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function parseDateKey(key) {
+      const [year, month, day] = safeText(key).split("-").map(Number);
+      if (!year || !month || !day) return null;
+      return new Date(year, month - 1, day);
+    }
+
+    function dateParts(value) {
+      const text = safeText(value);
+      return { date:text.slice(0, 10), time:text.length >= 16 ? text.slice(11, 16) : "" };
+    }
+
+    function subjectName(id) {
+      return visible(study.subjects).find((subject) => subject.id === id)?.name || "";
+    }
+
+    function subjectColor(id) {
+      return visible(study.subjects).find((subject) => subject.id === id)?.color || "";
+    }
+
+    function eventColor(event) {
+      return subjectColor(event.subject_id) || (event.importance === "alta" ? "#ef4444" : event.importance === "media" ? "#f59e0b" : "#8B5CF6");
+    }
+
+    function eventLinkedLabel(event) {
+      if (event.linked_entity_type === "study_evaluation") return "Evaluacion";
+      if (event.linked_entity_type === "study_assignment") return "TP";
+      return subjectName(event.subject_id) ? "Materia" : "General";
+    }
+
+    function eventTypeLabel(value) {
+      return eventTypes.find(([type]) => type === value)?.[1] || safeText(value, "Evento");
+    }
+
+    function eventsForDate(dateKey) {
+      return events
+        .filter((event) => dateParts(event.starts_at).date === dateKey)
+        .sort((a, b) => safeText(a.starts_at).localeCompare(safeText(b.starts_at)));
+    }
+
+    async function loadCalendar() {
+      const data = await api("/api/calendar/events");
+      events = visible(data.events || []);
+      study = data.study || study;
+      render();
+    }
+
+    function render() {
+      const todayKey = toDateKey(new Date());
+      const weekLimit = new Date();
+      weekLimit.setDate(weekLimit.getDate() + 7);
+      $("eventCount").textContent = events.length;
+      $("academicCount").textContent = events.filter((event) => academicTypes.has(event.type)).length;
+      $("weekCount").textContent = events.filter((event) => {
+        const key = dateParts(event.starts_at).date;
+        return key >= todayKey && key <= toDateKey(weekLimit);
+      }).length;
+
+      $("eventSubject").innerHTML = `<option value="">Sin materia</option>` + visible(study.subjects).map((subject) => `<option value="${subject.id}">${escapeHtml(subject.name)}</option>`).join("");
+      $("eventDate").value = selectedDateKey;
+      renderMonth();
+      renderSelectedDay();
+      renderEventAdmin();
+    }
+
+    function renderMonth() {
+      $("weekdayGrid").innerHTML = weekDays.map((day) => `<div class="weekday">${day}</div>`).join("");
+      $("monthTitle").textContent = monthFormatter.format(viewDate);
+      const year = viewDate.getFullYear();
+      const month = viewDate.getMonth();
+      const first = new Date(year, month, 1);
+      const offset = (first.getDay() + 6) % 7;
+      const start = new Date(year, month, 1 - offset);
+      const todayKey = toDateKey(new Date());
+      const cells = [];
+
+      for (let index = 0; index < 42; index++) {
+        const date = new Date(start);
+        date.setDate(start.getDate() + index);
+        const key = toDateKey(date);
+        const dayEvents = eventsForDate(key);
+        const visibleEvents = dayEvents.slice(0, 3);
+        const className = [
+          "calendar-cell",
+          date.getMonth() === month ? "" : "outside-month",
+          key === todayKey ? "today" : "",
+          key === selectedDateKey ? "selected" : ""
+        ].filter(Boolean).join(" ");
+        cells.push(`
+          <button class="${className}" onclick="selectDay('${key}')">
+            <span class="day-number">${date.getDate()}</span>
+            <span class="event-chip-list">
+              ${visibleEvents.map((event) => `<span class="calendar-event-chip" style="--event-color:${escapeHtml(eventColor(event))}">${escapeHtml(event.title, "Evento")}</span>`).join("")}
+              ${dayEvents.length > visibleEvents.length ? `<span class="more-events">+${dayEvents.length - visibleEvents.length} más</span>` : ""}
+            </span>
+          </button>
+        `);
+      }
+
+      $("monthGrid").innerHTML = cells.join("");
+    }
+
+    function renderSelectedDay() {
+      const date = parseDateKey(selectedDateKey) || new Date();
+      const dayEvents = eventsForDate(selectedDateKey);
+      $("selectedDayTitle").textContent = longDateFormatter.format(date);
+      $("selectedDaySummary").textContent = dayEvents.length ? `${dayEvents.length} evento${dayEvents.length === 1 ? "" : "s"} en este día.` : "No hay eventos cargados para este día.";
+      $("selectedDayEvents").innerHTML = dayEvents.length ? dayEvents.map((event) => {
+        const parts = dateParts(event.starts_at);
+        const linked = subjectName(event.subject_id);
+        return `
+          <article class="day-event-card ${escapeHtml(event.importance, "media")}">
+            <span class="pill">${escapeHtml(parts.time || "Todo el dia")}</span>
+            <span class="pill">${escapeHtml(eventTypeLabel(event.type))}</span>
+            <strong style="display:block;margin-top:8px">${escapeHtml(event.title, "Evento sin titulo")}</strong>
+            <p class="muted">${escapeHtml(eventLinkedLabel(event))}${linked ? ` - ${escapeHtml(linked)}` : ""}</p>
+            <div class="mini-actions"><button class="light" onclick="openEventEditor('${event.id}')">Editar</button></div>
+          </article>
+        `;
+      }).join("") : `<p class="muted">Tocá Agregar evento para cargar algo en esta fecha.</p>`;
+    }
+
+    function renderEventAdmin() {
+      $("eventList").innerHTML = events.slice().sort((a, b) => safeText(a.starts_at).localeCompare(safeText(b.starts_at))).map(eventRow).join("") || `<p class="muted">Todavia no hay eventos.</p>`;
+    }
+
+    function eventRow(event) {
+      const parts = dateParts(event.starts_at);
+      return `
+        <div class="event-row" id="eventRow-${event.id}">
+          <div>
+            <strong>${escapeHtml(parts.date || "Sin fecha")}</strong><br>
+            <span class="muted">${escapeHtml(parts.time || "Todo el dia")}</span><br>
+            <span class="pill">${escapeHtml(eventTypeLabel(event.type))}</span>
+          </div>
+          <div class="event-edit">
+            <input id="eventTitle-${event.id}" value="${escapeHtml(event.title)}">
+            <div class="row-3">
+              <select id="eventType-${event.id}">${eventTypes.map(([type, label]) => `<option value="${type}" ${event.type === type ? "selected" : ""}>${label}</option>`).join("")}</select>
+              <input id="eventDate-${event.id}" type="date" value="${escapeHtml(parts.date)}">
+              <input id="eventTime-${event.id}" type="time" value="${escapeHtml(parts.time)}">
+            </div>
+            <div class="row-2">
+              <select id="eventSubject-${event.id}">
+                <option value="">Sin materia</option>
+                ${visible(study.subjects).map((subject) => `<option value="${subject.id}" ${event.subject_id === subject.id ? "selected" : ""}>${escapeHtml(subject.name)}</option>`).join("")}
+              </select>
+              <select id="eventImportance-${event.id}">${["alta","media","baja"].map((importance) => `<option value="${importance}" ${event.importance === importance ? "selected" : ""}>${importance}</option>`).join("")}</select>
+            </div>
+            <textarea id="eventNotes-${event.id}" placeholder="Notas">${escapeHtml(event.notes)}</textarea>
+            <p class="muted">${escapeHtml(eventLinkedLabel(event))}${subjectName(event.subject_id) ? ` - ${escapeHtml(subjectName(event.subject_id))}` : ""}</p>
+            <div class="mini-actions">
+              <button onclick="saveEvent('${event.id}')">Guardar</button>
+              <button class="danger" onclick="deleteEvent('${event.id}')">Borrar</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function selectDay(dateKey) {
+      selectedDateKey = dateKey;
+      const parsed = parseDateKey(dateKey);
+      if (parsed) viewDate = new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+      render();
+    }
+
+    function moveMonth(delta) {
+      viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + delta, 1);
+      selectedDateKey = toDateKey(viewDate);
+      render();
+    }
+
+    function goToday() {
+      const today = new Date();
+      viewDate = new Date(today.getFullYear(), today.getMonth(), 1);
+      selectedDateKey = toDateKey(today);
+      render();
+    }
+
+    function prepareEventForSelectedDay() {
+      $("eventAdmin").open = true;
+      $("eventDate").value = selectedDateKey;
+      $("status").textContent = "Fecha preseleccionada.";
+      $("eventTitle").focus();
+    }
+
+    function openEventEditor(id) {
+      $("eventAdmin").open = true;
+      setTimeout(() => {
+        const row = $(`eventRow-${id}`);
+        if (row) row.scrollIntoView({ behavior:"smooth", block:"center" });
+        const input = $(`eventTitle-${id}`);
+        if (input) input.focus();
+      }, 0);
+    }
+
+    async function addEvent() {
+      try {
+        await api("/api/calendar/events", {
+          title:$("eventTitle").value,
+          type:$("eventType").value,
+          date:$("eventDate").value,
+          time:$("eventTime").value,
+          importance:$("eventImportance").value,
+          subject_id:$("eventSubject").value,
+          notes:$("eventNotes").value,
+          status:"pendiente"
+        });
+        selectedDateKey = $("eventDate").value || selectedDateKey;
+        $("status").textContent = "Evento creado.";
+        $("eventTitle").value = "";
+        $("eventNotes").value = "";
+        await loadCalendar();
+      } catch (error) { $("status").textContent = error.message; }
+    }
+
+    async function saveEvent(id) {
+      const event = events.find((item) => item.id === id);
+      try {
+        await api("/api/calendar/events/update", {
+          id,
+          title:$(`eventTitle-${id}`).value,
+          type:$(`eventType-${id}`).value,
+          date:$(`eventDate-${id}`).value,
+          time:$(`eventTime-${id}`).value,
+          importance:$(`eventImportance-${id}`).value,
+          subject_id:$(`eventSubject-${id}`).value,
+          linked_entity_type:event.linked_entity_type || "",
+          linked_entity_id:event.linked_entity_id || "",
+          status:event.status || "pendiente",
+          notes:$(`eventNotes-${id}`).value
+        });
+        selectedDateKey = $(`eventDate-${id}`).value || selectedDateKey;
+        const parsed = parseDateKey(selectedDateKey);
+        if (parsed) viewDate = new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+        $("status").textContent = "Evento actualizado.";
+        await loadCalendar();
+      } catch (error) { $("status").textContent = error.message; }
+    }
+
+    async function deleteEvent(id) {
+      try {
+        await api("/api/calendar/events/delete", { id });
+        $("status").textContent = "Evento eliminado.";
+        await loadCalendar();
+      } catch (error) { $("status").textContent = error.message; }
+    }
+
+    loadCalendar().catch((error) => $("status").textContent = error.message);
+  </script>
+</body>
+</html>

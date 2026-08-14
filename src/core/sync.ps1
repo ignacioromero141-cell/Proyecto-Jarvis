@@ -387,6 +387,87 @@ function Get-JarvisSyncEntityStore {
                 }
             }
         }
+        "calendar_events" {
+            if (Get-Command Read-CalendarEvents -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "calendar_events"
+                    read = { Read-CalendarEvents }
+                    write = { param($Items) Write-CalendarEvents -Events $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "study_subjects" {
+            if (Get-Command Read-StudySubjects -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "study_subjects"
+                    read = { Read-StudySubjects }
+                    write = { param($Items) Write-StudySubjects -Subjects $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "study_topics" {
+            if (Get-Command Read-StudyTopics -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "study_topics"
+                    read = { Read-StudyTopics }
+                    write = { param($Items) Write-StudyTopics -Topics $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "study_evaluations" {
+            if (Get-Command Read-StudyEvaluations -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "study_evaluations"
+                    read = { Read-StudyEvaluations }
+                    write = { param($Items) Write-StudyEvaluations -Evaluations $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "study_assignments" {
+            if (Get-Command Read-StudyAssignments -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "study_assignments"
+                    read = { Read-StudyAssignments }
+                    write = { param($Items) Write-StudyAssignments -Assignments $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "study_notes" {
+            if (Get-Command Read-StudyNotes -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "study_notes"
+                    read = { Read-StudyNotes }
+                    write = { param($Items) Write-StudyNotes -Notes $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "study_schedules" {
+            if (Get-Command Read-StudySchedules -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "study_schedules"
+                    read = { Read-StudySchedules }
+                    write = { param($Items) Write-StudySchedules -Schedules $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "file_assets" {
+            if (Get-Command Read-FileAssets -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "file_assets"
+                    read = { Read-FileAssets }
+                    write = { param($Items) Write-FileAssets -Assets $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
+        "file_links" {
+            if (Get-Command Read-FileLinks -ErrorAction SilentlyContinue) {
+                return [pscustomobject]@{
+                    entity = "file_links"
+                    read = { Read-FileLinks }
+                    write = { param($Items) Write-FileLinks -Links $Items -BackupReason "sync-apply" }
+                }
+            }
+        }
     }
 
     return $null
@@ -436,7 +517,21 @@ function Ensure-JarvisBaselineSyncChanges {
     }
 
     $added = 0
-    $entities = @("records", "finance_movements", "finance_settings", "finance_payment_methods")
+    $entities = @(
+        "records",
+        "finance_movements",
+        "finance_settings",
+        "finance_payment_methods",
+        "calendar_events",
+        "study_subjects",
+        "study_topics",
+        "study_evaluations",
+        "study_assignments",
+        "study_notes",
+        "study_schedules",
+        "file_assets",
+        "file_links"
+    )
     foreach ($entity in $entities) {
         $store = Get-JarvisSyncEntityStore -Entity $entity
         if (-not $store) { continue }

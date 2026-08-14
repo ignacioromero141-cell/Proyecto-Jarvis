@@ -21,8 +21,8 @@ function jarvisNavHtml(active = "dashboard") {
         <a class="${itemClass("dashboard")}" href="${jarvisPageUrl("index.html")}">Dashboard</a>
         <a class="${itemClass("finance")}" href="${jarvisPageUrl("finance.html")}">Finanzas</a>
         <a class="${itemClass("organization")}" href="${jarvisPageUrl("organization.html")}">Organizacion</a>
-        <a class="nav-item soon" href="#calendario">Calendario - futuro</a>
-        <a class="nav-item soon" href="#estudio">Estudio - futuro</a>
+        <a class="${itemClass("study")}" href="${jarvisPageUrl("study.html")}">Estudio</a>
+        <a class="${itemClass("calendar")}" href="${jarvisPageUrl("calendar.html")}">Calendario</a>
         <a class="nav-item soon" href="#gym">Gym - futuro</a>
         <a class="nav-item soon" href="#ia">IA - futuro</a>
         <a class="${itemClass("settings")}" href="${jarvisPageUrl("settings.html")}">Configuracion</a>

@@ -23,12 +23,26 @@
     .quick-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
     .capture-row { display:grid; grid-template-columns:160px 1fr 150px; gap:10px; margin-top:10px; }
     .content-grid { display:grid; grid-template-columns:1.4fr .8fr; gap:16px; }
+    .top-agenda-grid { display:grid; grid-template-columns:1fr; gap:16px; align-items:start; }
+    .panel-title-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+    .panel-title-row h2 { margin:0; }
+    .upcoming-list { display:grid; gap:10px; }
+    .upcoming-item { display:grid; grid-template-columns:10px minmax(0,1fr); gap:10px; align-items:start; border:1px solid var(--border-secondary); border-radius:14px; padding:12px; background:var(--color-surface-elevated); }
+    .event-dot { width:10px; height:10px; border-radius:999px; margin-top:6px; background:#8B5CF6; box-shadow:0 0 0 4px rgba(139,92,246,.12); }
+    .upcoming-item.alta { border-color:rgba(239,68,68,.45); }
+    .upcoming-item.alta .event-dot { background:#ef4444; box-shadow:0 0 0 4px rgba(239,68,68,.14); }
+    .upcoming-item.media .event-dot { background:#f59e0b; box-shadow:0 0 0 4px rgba(245,158,11,.14); }
+    .insight-list { display:grid; gap:10px; }
+    .insight-item { border:1px solid var(--border-secondary); border-radius:14px; padding:12px; background:var(--color-surface-elevated); }
+    .insight-item.alta { border-color:rgba(239,68,68,.45); }
+    .insight-item.media { border-color:rgba(245,158,11,.45); }
     @media (max-width:980px) {
       .grid-4, .grid-3, .quick-actions, .content-grid { grid-template-columns:1fr 1fr; }
     }
     @media (max-width:650px) {
-      .dashboard, .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid { min-width:0; max-width:100%; }
-      .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid { grid-template-columns:1fr; }
+      .dashboard, .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid, .top-agenda-grid { min-width:0; max-width:100%; }
+      .grid-4, .grid-3, .quick-actions, .capture-row, .content-grid, .top-agenda-grid { grid-template-columns:1fr; }
+      .panel-title-row { align-items:flex-start; flex-direction:column; }
     }
   </style>
 </head>
@@ -45,6 +59,21 @@
     <div data-jarvis-nav="dashboard"></div>
 
     <div class="dashboard">
+      <div class="top-agenda-grid">
+        <section class="panel">
+          <div class="panel-title-row">
+            <h2>Próximas fechas</h2>
+            <a class="button-link light" href="calendar.html">Ver Calendario</a>
+          </div>
+          <div id="upcomingEvents" class="upcoming-list"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Anticipación</h2>
+          <div id="insights" class="insight-list"></div>
+        </section>
+      </div>
+
       <section class="panel">
         <h2>Finanzas del mes</h2>
         <p class="muted">Resumen conectado al modulo Finanzas.</p>
@@ -73,6 +102,8 @@
         <div class="quick-actions">
           <a class="button-link finance" href="finance.html">Agregar un gasto</a>
           <a class="button-link income" href="finance.html">Agregar un ingreso</a>
+          <a class="button-link light" href="study.html">Ver Estudio</a>
+          <a class="button-link light" href="calendar.html">Ver Calendario</a>
           <button onclick="prepareCapture('tarea')">Crear una tarea</button>
           <button class="secondary" onclick="prepareCapture('idea')">Guardar una idea</button>
         </div>
@@ -117,6 +148,8 @@
     let records = [];
     let financeSummary = null;
     let financeMovements = [];
+    let insights = [];
+    let calendarEvents = [];
     const money = new Intl.NumberFormat("es-AR", { style:"currency", currency:"ARS", maximumFractionDigits:0 });
 
     function currentMonth() {
@@ -143,7 +176,55 @@
       financeSummary = financeData.summary || {};
       financeMovements = financeData.movements || [];
 
+      const insightsData = await api("/api/insights");
+      insights = insightsData.insights || [];
+
+      const calendarData = await api("/api/calendar/events");
+      calendarEvents = calendarData.events || [];
+
       render();
+    }
+
+    function dateKey(value) {
+      return safeText(value).slice(0, 10);
+    }
+
+    function timeKey(value) {
+      const text = safeText(value);
+      return text.length >= 16 ? text.slice(11, 16) : "";
+    }
+
+    function daysFromToday(dateText) {
+      const parsed = Date.parse(dateText);
+      if (!Number.isFinite(parsed)) return null;
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      return Math.round((parsed - today) / 86400000);
+    }
+
+    function relativeDateLabel(dateText, timeText = "") {
+      const days = daysFromToday(dateText);
+      if (days === null) return timeText || "Sin fecha";
+      const suffix = timeText ? ` - ${timeText}` : "";
+      if (days === 0) return `hoy${suffix}`;
+      if (days === 1) return `mañana${suffix}`;
+      if (days > 1) return `en ${days} días${suffix}`;
+      return `hace ${Math.abs(days)} días${suffix}`;
+    }
+
+    function calendarTypeLabel(value) {
+      const labels = { cumpleanos:"Cumpleaños" };
+      return labels[value] || safeText(value, "evento");
+    }
+
+    function upcomingCalendarEvents() {
+      const importanceRank = { alta:0, media:1, baja:2 };
+      return calendarEvents
+        .filter((event) => !safeText(event.deleted_at) && dateKey(event.starts_at))
+        .map((event) => ({ event, days:daysFromToday(dateKey(event.starts_at)) }))
+        .filter((item) => item.days !== null && item.days >= 0)
+        .sort((a, b) => a.days - b.days || (importanceRank[a.event.importance] ?? 9) - (importanceRank[b.event.importance] ?? 9) || safeText(a.event.starts_at).localeCompare(safeText(b.event.starts_at)))
+        .slice(0, 4);
     }
 
     function render() {
@@ -164,9 +245,27 @@
       $("nextTask").textContent = pending.length ? `Proxima tarea: ${safeText(pending[0].title, safeText(pending[0].text, "(sin texto)"))}` : "No tenes tareas pendientes.";
       $("todaySummary").textContent = `Registros cargados hoy: ${todayCount}. Total en memoria: ${records.length}.`;
 
+      const upcoming = upcomingCalendarEvents();
+      $("upcomingEvents").innerHTML = upcoming.length ? upcoming.map(({ event }) => `
+        <div class="upcoming-item ${escapeHtml(event.importance, "media")}">
+          <span class="event-dot"></span>
+          <div>
+            <strong>${escapeHtml(event.title, "Evento sin titulo")}</strong>
+            <p class="muted">${escapeHtml(relativeDateLabel(dateKey(event.starts_at), timeKey(event.starts_at)))} · ${escapeHtml(calendarTypeLabel(event.type))}</p>
+          </div>
+        </div>
+      `).join("") : `<p class="muted">No hay fechas próximas cargadas.</p>`;
+
       $("pending").innerHTML = pending.length ? pending.slice(0, 3).map((r) => `<li>${escapeHtml(r.title, safeText(r.text, "(sin texto)"))}</li>`).join("") : "<li>No tenes tareas pendientes.</li>";
       const recentMovement = financeMovements.slice().reverse()[0];
       $("recentFinance").innerHTML = recentMovement ? `<li><span class="pill">${escapeHtml(recentMovement.kind)}</span> ${money.format(recentMovement.amount || 0)} - ${escapeHtml(recentMovement.note, safeText(recentMovement.category_id, "sin detalle"))}</li>` : "<li>Todavia no hay movimientos financieros.</li>";
+
+      $("insights").innerHTML = insights.length ? insights.map((insight) => `
+        <div class="insight-item ${escapeHtml(insight.severity, "media")}">
+          <span class="pill">${escapeHtml(insight.severity, "media")}</span>
+          <strong style="display:block;margin-top:8px">${escapeHtml(insight.message)}</strong>
+        </div>
+      `).join("") : `<p class="muted">Sin avisos importantes por ahora.</p>`;
 
       $("records").innerHTML = records.slice().reverse().slice(0, 8).map((record) => `
         <tr>

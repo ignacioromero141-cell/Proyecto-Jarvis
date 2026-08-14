@@ -1,6 +1,6 @@
 (function () {
   const DB_NAME = "jarvis-local-first";
-  const DB_VERSION = 4;
+  const DB_VERSION = 5;
   const DEVICE_KEY = "jarvis_device_id";
   const WORKSPACE_KEY = "jarvis_workspace_id";
   const WORKSPACE_NAME_KEY = "jarvis_workspace_name";
@@ -97,6 +97,15 @@
   function openDb() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
+      let settled = false;
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      const timer = setTimeout(() => {
+        fail(new Error("No se pudo abrir la base local de Jarvis. Cierra otras pestanas de Jarvis y vuelve a intentarlo."));
+      }, 10000);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains("records")) db.createObjectStore("records", { keyPath:"id" });
@@ -105,12 +114,42 @@
         if (!db.objectStoreNames.contains("finance_priorities")) db.createObjectStore("finance_priorities", { keyPath:"id" });
         if (!db.objectStoreNames.contains("finance_payment_methods")) db.createObjectStore("finance_payment_methods", { keyPath:"id" });
         if (!db.objectStoreNames.contains("finance_settings")) db.createObjectStore("finance_settings", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("calendar_events")) db.createObjectStore("calendar_events", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("study_subjects")) db.createObjectStore("study_subjects", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("study_topics")) db.createObjectStore("study_topics", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("study_evaluations")) db.createObjectStore("study_evaluations", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("study_assignments")) db.createObjectStore("study_assignments", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("study_notes")) db.createObjectStore("study_notes", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("study_schedules")) db.createObjectStore("study_schedules", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("file_assets")) db.createObjectStore("file_assets", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("file_links")) db.createObjectStore("file_links", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("local_file_roots")) db.createObjectStore("local_file_roots", { keyPath:"id" });
+        if (!db.objectStoreNames.contains("local_file_locations")) db.createObjectStore("local_file_locations", { keyPath:"id" });
         if (!db.objectStoreNames.contains("sync_changes")) db.createObjectStore("sync_changes", { keyPath:"change_id" });
         if (!db.objectStoreNames.contains("sync_conflicts")) db.createObjectStore("sync_conflicts", { keyPath:"conflict_id" });
         if (!db.objectStoreNames.contains("metadata")) db.createObjectStore("metadata", { keyPath:"key" });
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        clearTimeout(timer);
+        const db = request.result;
+        db.onversionchange = () => {
+          db.close();
+        };
+        if (settled) {
+          db.close();
+          return;
+        }
+        settled = true;
+        resolve(db);
+      };
+      request.onerror = () => {
+        clearTimeout(timer);
+        fail(request.error || new Error("No se pudo abrir la base local de Jarvis."));
+      };
+      request.onblocked = () => {
+        clearTimeout(timer);
+        fail(new Error("Jarvis necesita actualizar la base local. Cierra otras pestanas de Jarvis y abre Estudio nuevamente."));
+      };
     });
   }
 
@@ -165,7 +204,9 @@
   async function localUserDataIsEmpty() {
     const counts = await Promise.all([
       all("records"),
-      all("finance_movements")
+      all("finance_movements"),
+      all("study_subjects"),
+      all("calendar_events")
     ]);
     return counts.every((items) => !items.length);
   }
@@ -209,7 +250,16 @@
       finance_categories:await importList("finance_categories", snapshot.finance?.categories),
       finance_priorities:await importList("finance_priorities", snapshot.finance?.priorities),
       finance_payment_methods:await importList("finance_payment_methods", snapshot.finance?.payment_methods),
-      finance_settings:0
+      finance_settings:0,
+      calendar_events:await importList("calendar_events", snapshot.calendar?.events),
+      study_subjects:await importList("study_subjects", snapshot.study?.subjects),
+      study_topics:await importList("study_topics", snapshot.study?.topics),
+      study_evaluations:await importList("study_evaluations", snapshot.study?.evaluations),
+      study_assignments:await importList("study_assignments", snapshot.study?.assignments),
+      study_notes:await importList("study_notes", snapshot.study?.notes),
+      study_schedules:await importList("study_schedules", snapshot.study?.schedules),
+      file_assets:await importList("file_assets", snapshot.files?.assets),
+      file_links:await importList("file_links", snapshot.files?.links)
     };
 
     const settings = normalizeSettings(snapshot.finance?.settings);
@@ -282,7 +332,16 @@
       finance_categories:"finance_categories",
       finance_priorities:"finance_priorities",
       finance_payment_methods:"finance_payment_methods",
-      finance_settings:"finance_settings"
+      finance_settings:"finance_settings",
+      calendar_events:"calendar_events",
+      study_subjects:"study_subjects",
+      study_topics:"study_topics",
+      study_evaluations:"study_evaluations",
+      study_assignments:"study_assignments",
+      study_notes:"study_notes",
+      study_schedules:"study_schedules",
+      file_assets:"file_assets",
+      file_links:"file_links"
     };
     return stores[entity] || null;
   }
@@ -896,6 +955,418 @@
     await track("finance_payment_methods", method.id, "delete", method);
   }
 
+  function clampProgress(value) {
+    const number = Number(value || 0);
+    if (!Number.isFinite(number)) return 0;
+    return Math.max(0, Math.min(100, Math.round(number)));
+  }
+
+  function dateTimeText(date, time = "") {
+    const safeDate = String(date || "").trim();
+    if (!safeDate) throw new Error("Carga una fecha.");
+    const safeTime = String(time || "").trim();
+    return `${safeDate}T${safeTime || "00:00"}:00`;
+  }
+
+  async function studySummary() {
+    return {
+      subjects:visible(await all("study_subjects")),
+      topics:visible(await all("study_topics")),
+      evaluations:visible(await all("study_evaluations")),
+      assignments:visible(await all("study_assignments")),
+      notes:visible(await all("study_notes")),
+      schedules:visible(await all("study_schedules"))
+    };
+  }
+
+  async function filesSummary() {
+    return {
+      assets:visible(await all("file_assets")),
+      links:visible(await all("file_links")),
+      roots:await all("local_file_roots"),
+      locations:(await all("local_file_locations")).map((location) => ({
+        id:location.id,
+        file_id:location.file_id,
+        root_id:location.root_id,
+        relative_path:location.relative_path,
+        device_id:location.device_id,
+        available:location.available,
+        last_seen_at:location.last_seen_at
+      }))
+    };
+  }
+
+  async function createSubject(body) {
+    const name = String(body.name || "").trim();
+    if (!name) throw new Error("La materia necesita un nombre.");
+    const time = nowText();
+    const subject = {
+      id:newId("subject-"),
+      name,
+      status:body.status || "cursando",
+      year:String(body.year || ""),
+      term:String(body.term || ""),
+      professors:String(body.professors || ""),
+      classroom:String(body.classroom || ""),
+      evaluation_method:String(body.evaluation_method || ""),
+      schedule_notes:String(body.schedule_notes || ""),
+      color:body.color || "#8B5CF6",
+      device_id:deviceId(),
+      workspace_id:workspaceId(),
+      revision:1,
+      deleted_at:null,
+      archived_at:null,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    await put("study_subjects", subject);
+    await track("study_subjects", subject.id, "create", subject);
+    return subject;
+  }
+
+  async function updateSubject(body) {
+    const subject = await get("study_subjects", body.id);
+    if (!subject) throw new Error("No encontre esa materia.");
+    const time = nowText();
+    Object.assign(subject, {
+      name:String(body.name || subject.name || "").trim(),
+      status:body.status || subject.status || "cursando",
+      year:String(body.year || ""),
+      term:String(body.term || ""),
+      professors:String(body.professors || ""),
+      classroom:String(body.classroom || ""),
+      evaluation_method:String(body.evaluation_method || ""),
+      schedule_notes:String(body.schedule_notes || ""),
+      color:body.color || subject.color || "#8B5CF6",
+      archived_at:body.status === "archivada" ? (subject.archived_at || time) : null,
+      updated_at:time,
+      revision:Number(subject.revision || 0) + 1,
+      synced_at:null,
+      device_id:subject.device_id || deviceId(),
+      workspace_id:workspaceId()
+    });
+    await put("study_subjects", subject);
+    await track("study_subjects", subject.id, "update", subject);
+    return subject;
+  }
+
+  async function archiveSubject(body) {
+    const subject = await get("study_subjects", body.id);
+    if (!subject) throw new Error("No encontre esa materia.");
+    subject.status = "archivada";
+    subject.archived_at = nowText();
+    subject.updated_at = subject.archived_at;
+    subject.revision = Number(subject.revision || 0) + 1;
+    subject.synced_at = null;
+    await put("study_subjects", subject);
+    await track("study_subjects", subject.id, "archive", subject);
+    return subject;
+  }
+
+  async function createTopic(body) {
+    if (!(await get("study_subjects", body.subject_id))) throw new Error("Materia invalida.");
+    const title = String(body.title || "").trim();
+    if (!title) throw new Error("El tema necesita un titulo.");
+    const time = nowText();
+    const topic = {
+      id:newId("topic-"),
+      subject_id:body.subject_id,
+      title,
+      status:body.status || "pendiente",
+      progress:clampProgress(body.progress),
+      notes:String(body.notes || ""),
+      device_id:deviceId(),
+      workspace_id:workspaceId(),
+      revision:1,
+      deleted_at:null,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    await put("study_topics", topic);
+    await track("study_topics", topic.id, "create", topic);
+    return topic;
+  }
+
+  async function updateTopic(body) {
+    const topic = await get("study_topics", body.id);
+    if (!topic) throw new Error("No encontre ese tema.");
+    Object.assign(topic, {
+      title:String(body.title || topic.title || "").trim(),
+      status:body.status || "pendiente",
+      progress:clampProgress(body.progress),
+      notes:String(body.notes || ""),
+      updated_at:nowText(),
+      revision:Number(topic.revision || 0) + 1,
+      synced_at:null
+    });
+    await put("study_topics", topic);
+    await track("study_topics", topic.id, "update", topic);
+    return topic;
+  }
+
+  async function softDelete(storeName, entity, id) {
+    const item = await get(storeName, id);
+    if (!item) return null;
+    item.deleted_at = nowText();
+    item.updated_at = item.deleted_at;
+    item.revision = Number(item.revision || 0) + 1;
+    item.synced_at = null;
+    await put(storeName, item);
+    await track(entity, item.id, "delete", item);
+    return item;
+  }
+
+  async function createCalendarEvent(body) {
+    const title = String(body.title || "").trim();
+    if (!title) throw new Error("El evento necesita un titulo.");
+    const time = nowText();
+    const event = {
+      id:newId("event-"),
+      title,
+      type:body.type || "recordatorio",
+      starts_at:dateTimeText(body.date, body.time),
+      ends_at:String(body.ends_at || ""),
+      all_day:Boolean(body.all_day),
+      importance:body.importance || "media",
+      subject_id:String(body.subject_id || ""),
+      linked_entity_type:String(body.linked_entity_type || ""),
+      linked_entity_id:String(body.linked_entity_id || ""),
+      status:body.status || "pendiente",
+      notes:String(body.notes || ""),
+      device_id:deviceId(),
+      workspace_id:workspaceId(),
+      revision:1,
+      deleted_at:null,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    await put("calendar_events", event);
+    await track("calendar_events", event.id, "create", event);
+    return event;
+  }
+
+  async function updateCalendarEvent(body) {
+    const event = await get("calendar_events", body.id);
+    if (!event) throw new Error("No encontre ese evento.");
+    Object.assign(event, {
+      title:String(body.title || event.title || "").trim(),
+      type:body.type || event.type || "recordatorio",
+      starts_at:dateTimeText(body.date, body.time),
+      ends_at:String(body.ends_at || ""),
+      all_day:Boolean(body.all_day),
+      importance:body.importance || "media",
+      subject_id:String(body.subject_id || ""),
+      linked_entity_type:String(body.linked_entity_type || event.linked_entity_type || ""),
+      linked_entity_id:String(body.linked_entity_id || event.linked_entity_id || ""),
+      status:body.status || event.status || "pendiente",
+      notes:String(body.notes || ""),
+      updated_at:nowText(),
+      revision:Number(event.revision || 0) + 1,
+      synced_at:null
+    });
+    await put("calendar_events", event);
+    await track("calendar_events", event.id, "update", event);
+    return event;
+  }
+
+  async function createCalendarBackedItem(kind, body) {
+    const subject = await get("study_subjects", body.subject_id);
+    if (!subject) throw new Error("Materia invalida.");
+    const title = String(body.title || "").trim();
+    if (!title) throw new Error("Necesita un titulo.");
+    const isEvaluation = kind === "evaluation";
+    const id = newId(isEvaluation ? "evaluation-" : "assignment-");
+    const event = await createCalendarEvent({
+      title:`${subject.name}: ${title}`,
+      type:isEvaluation ? (body.type || "parcial") : "tp",
+      date:body.date,
+      time:body.time,
+      importance:body.importance || (isEvaluation ? "alta" : "media"),
+      subject_id:subject.id,
+      linked_entity_type:isEvaluation ? "study_evaluation" : "study_assignment",
+      linked_entity_id:id,
+      status:body.status || "pendiente",
+      notes:body.notes || ""
+    });
+    const time = nowText();
+    const item = {
+      id,
+      subject_id:subject.id,
+      title,
+      type:isEvaluation ? (body.type || "parcial") : "tp",
+      calendar_event_id:event.id,
+      topic_ids:[],
+      status:body.status || "pendiente",
+      progress:clampProgress(body.progress),
+      notes:String(body.notes || ""),
+      device_id:deviceId(),
+      workspace_id:workspaceId(),
+      revision:1,
+      deleted_at:null,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    const storeName = isEvaluation ? "study_evaluations" : "study_assignments";
+    const entity = isEvaluation ? "study_evaluations" : "study_assignments";
+    await put(storeName, item);
+    await track(entity, item.id, "create", item);
+    return item;
+  }
+
+  async function updateCalendarBackedItem(kind, body) {
+    const isEvaluation = kind === "evaluation";
+    const storeName = isEvaluation ? "study_evaluations" : "study_assignments";
+    const entity = isEvaluation ? "study_evaluations" : "study_assignments";
+    const item = await get(storeName, body.id);
+    if (!item) throw new Error("No encontre ese registro academico.");
+    const subject = await get("study_subjects", item.subject_id);
+    const title = String(body.title || item.title || "").trim();
+    const eventBody = {
+      id:item.calendar_event_id,
+      title:`${subject?.name || "Materia"}: ${title}`,
+      type:isEvaluation ? (body.type || item.type || "parcial") : "tp",
+      date:body.date,
+      time:body.time,
+      importance:body.importance || "media",
+      subject_id:item.subject_id,
+      linked_entity_type:isEvaluation ? "study_evaluation" : "study_assignment",
+      linked_entity_id:item.id,
+      status:body.status || item.status || "pendiente",
+      notes:body.notes || ""
+    };
+    let event = item.calendar_event_id ? await get("calendar_events", item.calendar_event_id) : null;
+    if (event) await updateCalendarEvent(eventBody);
+    else {
+      event = await createCalendarEvent(eventBody);
+      item.calendar_event_id = event.id;
+    }
+    Object.assign(item, {
+      title,
+      type:isEvaluation ? (body.type || item.type || "parcial") : "tp",
+      status:body.status || item.status || "pendiente",
+      progress:clampProgress(body.progress),
+      notes:String(body.notes || ""),
+      updated_at:nowText(),
+      revision:Number(item.revision || 0) + 1,
+      synced_at:null
+    });
+    await put(storeName, item);
+    await track(entity, item.id, "update", item);
+    return item;
+  }
+
+  async function deleteCalendarBackedItem(kind, id) {
+    const isEvaluation = kind === "evaluation";
+    const storeName = isEvaluation ? "study_evaluations" : "study_assignments";
+    const entity = isEvaluation ? "study_evaluations" : "study_assignments";
+    const item = await get(storeName, id);
+    if (item?.calendar_event_id) await softDelete("calendar_events", "calendar_events", item.calendar_event_id);
+    return softDelete(storeName, entity, id);
+  }
+
+  async function createNote(body) {
+    if (!(await get("study_subjects", body.subject_id))) throw new Error("Materia invalida.");
+    const text = String(body.text || "").trim();
+    if (!text) throw new Error("La nota no puede estar vacia.");
+    const time = nowText();
+    const note = {
+      id:newId("note-"),
+      subject_id:body.subject_id,
+      title:String(body.title || "Nota").trim(),
+      text,
+      linked_entity_type:String(body.linked_entity_type || ""),
+      linked_entity_id:String(body.linked_entity_id || ""),
+      device_id:deviceId(),
+      workspace_id:workspaceId(),
+      revision:1,
+      deleted_at:null,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    await put("study_notes", note);
+    await track("study_notes", note.id, "create", note);
+    return note;
+  }
+
+  async function updateNote(body) {
+    const note = await get("study_notes", body.id);
+    if (!note) throw new Error("No encontre esa nota.");
+    note.title = String(body.title || note.title || "Nota").trim();
+    note.text = String(body.text || "");
+    note.updated_at = nowText();
+    note.revision = Number(note.revision || 0) + 1;
+    note.synced_at = null;
+    await put("study_notes", note);
+    await track("study_notes", note.id, "update", note);
+    return note;
+  }
+
+  async function createSchedule(body) {
+    if (!(await get("study_subjects", body.subject_id))) throw new Error("Materia invalida.");
+    if (!String(body.day_of_week || "").trim() || !String(body.starts_at || "").trim()) throw new Error("El horario necesita dia y hora.");
+    const time = nowText();
+    const schedule = {
+      id:newId("schedule-"),
+      subject_id:body.subject_id,
+      day_of_week:String(body.day_of_week || ""),
+      starts_at:String(body.starts_at || ""),
+      ends_at:String(body.ends_at || ""),
+      location:String(body.location || ""),
+      notes:String(body.notes || ""),
+      device_id:deviceId(),
+      workspace_id:workspaceId(),
+      revision:1,
+      deleted_at:null,
+      synced_at:null,
+      created_at:time,
+      updated_at:time
+    };
+    await put("study_schedules", schedule);
+    await track("study_schedules", schedule.id, "create", schedule);
+    return schedule;
+  }
+
+  function daysBetween(dateText) {
+    const date = Date.parse(String(dateText || "").slice(0, 10));
+    if (!Number.isFinite(date)) return null;
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    return Math.round((date - start) / 86400000);
+  }
+
+  async function localInsights() {
+    const study = await studySummary();
+    const events = visible(await all("calendar_events")).sort((a, b) => String(a.starts_at || "").localeCompare(String(b.starts_at || "")));
+    const insights = [];
+    const academicTypes = new Set(["parcial", "final", "tp", "entrega", "exposicion"]);
+    const upcoming = events.map((event) => ({ event, days:daysBetween(event.starts_at) })).filter((item) => item.days !== null && item.days >= 0 && item.days <= 14);
+    upcoming.slice(0, 4).forEach((item) => {
+      const when = item.days === 0 ? "hoy" : item.days === 1 ? "manana" : `en ${item.days} dias`;
+      insights.push({ id:`insight-calendar-${item.event.id}`, type:"calendar_upcoming", message:`${item.event.title} ${when}.`, severity:item.days <= 2 ? "alta" : "media", source_entity:"calendar_events", source_id:item.event.id, action:"open_calendar" });
+    });
+    const academic = upcoming.filter((item) => academicTypes.has(item.event.type));
+    if (academic.length >= 3) insights.push({ id:"insight-academic-density", type:"academic_density", message:`Tenes ${academic.length} fechas academicas importantes durante los proximos 14 dias.`, severity:"alta", source_entity:"calendar_events", source_id:"academic-density", action:"open_calendar" });
+    for (const evaluation of study.evaluations) {
+      const event = events.find((item) => item.id === evaluation.calendar_event_id);
+      const days = daysBetween(event?.starts_at);
+      if (days !== null && days >= 0 && days <= 21) {
+        const pendingTopics = study.topics.filter((topic) => topic.subject_id === evaluation.subject_id && !["hecho", "completado", "aprobado"].includes(topic.status)).length;
+        if (pendingTopics > 0) insights.push({ id:`insight-eval-${evaluation.id}`, type:"evaluation_preparation", message:`Faltan ${days} dias para ${evaluation.title} y quedan ${pendingTopics} temas pendientes.`, severity:"media", source_entity:"study_evaluations", source_id:evaluation.id, action:"open_study" });
+      }
+    }
+    study.subjects.filter((subject) => subject.status === "final_pendiente").slice(0, 2).forEach((subject) => {
+      if (!events.some((event) => event.subject_id === subject.id && daysBetween(event.starts_at) >= 0)) {
+        insights.push({ id:`insight-final-${subject.id}`, type:"pending_final", message:`${subject.name} tiene final pendiente y todavia no tiene fecha cargada.`, severity:"media", source_entity:"study_subjects", source_id:subject.id, action:"open_study" });
+      }
+    });
+    return insights.slice(0, 8);
+  }
+
   async function handle(path, body) {
     await ensureDefaults();
     const url = new URL(path, location.origin);
@@ -965,6 +1436,101 @@
     if (pathname === "/api/finance/payment-methods/delete") {
       await deletePaymentMethod(body || {});
       return { ok:true, local_only:true, payment_methods:sortedMethods(await all("finance_payment_methods")) };
+    }
+    if (pathname === "/api/study/summary") {
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")), files:await filesSummary() };
+    }
+    if (pathname === "/api/study/subjects") {
+      await createSubject(body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/subjects/update") {
+      await updateSubject(body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/subjects/archive") {
+      await archiveSubject(body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/topics") {
+      await createTopic(body || {});
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/topics/update") {
+      await updateTopic(body || {});
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/topics/delete") {
+      await softDelete("study_topics", "study_topics", body?.id);
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/evaluations") {
+      await createCalendarBackedItem("evaluation", body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/evaluations/update") {
+      await updateCalendarBackedItem("evaluation", body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/evaluations/delete") {
+      await deleteCalendarBackedItem("evaluation", body?.id);
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/assignments") {
+      await createCalendarBackedItem("assignment", body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/assignments/update") {
+      await updateCalendarBackedItem("assignment", body || {});
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/assignments/delete") {
+      await deleteCalendarBackedItem("assignment", body?.id);
+      return { ok:true, local_only:true, study:await studySummary(), events:visible(await all("calendar_events")) };
+    }
+    if (pathname === "/api/study/notes") {
+      await createNote(body || {});
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/notes/update") {
+      await updateNote(body || {});
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/notes/delete") {
+      await softDelete("study_notes", "study_notes", body?.id);
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/schedules") {
+      await createSchedule(body || {});
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/study/schedules/delete") {
+      await softDelete("study_schedules", "study_schedules", body?.id);
+      return { ok:true, local_only:true, study:await studySummary() };
+    }
+    if (pathname === "/api/calendar/events" && !body) {
+      return { ok:true, local_only:true, events:visible(await all("calendar_events")), study:await studySummary() };
+    }
+    if (pathname === "/api/calendar/events") {
+      await createCalendarEvent(body || {});
+      return { ok:true, local_only:true, events:visible(await all("calendar_events")), study:await studySummary() };
+    }
+    if (pathname === "/api/calendar/events/update") {
+      await updateCalendarEvent(body || {});
+      return { ok:true, local_only:true, events:visible(await all("calendar_events")), study:await studySummary() };
+    }
+    if (pathname === "/api/calendar/events/delete") {
+      await softDelete("calendar_events", "calendar_events", body?.id);
+      return { ok:true, local_only:true, events:visible(await all("calendar_events")), study:await studySummary() };
+    }
+    if (pathname === "/api/files/summary") {
+      return { ok:true, local_only:true, files:await filesSummary() };
+    }
+    if (pathname === "/api/files/roots" || pathname === "/api/files/scan" || pathname === "/api/files/open") {
+      throw new Error("Ruta local no disponible: archivos locales requieren backend notebook.");
+    }
+    if (pathname === "/api/insights") {
+      return { ok:true, local_only:true, insights:await localInsights() };
     }
     if (pathname === "/api/sync/status") {
       return syncStatus();

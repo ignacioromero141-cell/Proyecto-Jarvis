@@ -7,6 +7,9 @@ function Get-JarvisSidebarHtml {
     $dashboardClass = if ($Active -eq "dashboard") { "nav-item active" } else { "nav-item" }
     $financeClass = if ($Active -eq "finance") { "nav-item active" } else { "nav-item" }
     $organizationClass = if ($Active -eq "organization") { "nav-item active" } else { "nav-item" }
+    $studyClass = if ($Active -eq "study") { "nav-item active" } else { "nav-item" }
+    $calendarClass = if ($Active -eq "calendar") { "nav-item active" } else { "nav-item" }
+    $settingsClass = if ($Active -eq "settings") { "nav-item active" } else { "nav-item" }
 
     return @"
     <nav class="panel jarvis-nav">
@@ -23,11 +26,11 @@ function Get-JarvisSidebarHtml {
         <a class="$dashboardClass" href="/">Dashboard</a>
         <a class="$financeClass" href="/finance">Finanzas</a>
         <a class="$organizationClass" href="/organization">Organizacion</a>
-        <a class="nav-item soon" href="#calendario">Calendario - futuro</a>
-        <a class="nav-item soon" href="#estudio">Estudio - futuro</a>
+        <a class="$studyClass" href="/study">Estudio</a>
+        <a class="$calendarClass" href="/calendar">Calendario</a>
         <a class="nav-item soon" href="#gym">Gym - futuro</a>
         <a class="nav-item soon" href="#ia">IA - futuro</a>
-        <a class="nav-item soon" href="#configuracion">Configuracion - futuro</a>
+        <a class="$settingsClass" href="/settings">Configuracion</a>
       </div>
     </nav>
 "@

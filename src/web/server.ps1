@@ -3,6 +3,10 @@
 
 . (Join-Path $PSScriptRoot "..\core\records.ps1")
 . (Join-Path $PSScriptRoot "..\modules\finance\finance-summary.ps1")
+. (Join-Path $PSScriptRoot "..\modules\calendar\calendar-core.ps1")
+. (Join-Path $PSScriptRoot "..\modules\study\study-core.ps1")
+. (Join-Path $PSScriptRoot "..\modules\files\files-core.ps1")
+. (Join-Path $PSScriptRoot "..\core\insights.ps1")
 . (Join-Path $PSScriptRoot "..\core\sync.ps1")
 
 Add-Type -AssemblyName System.Web
@@ -220,6 +224,16 @@ function Handle-JarvisPageRoute {
         return $true
     }
 
+    if ($Request.method -eq "GET" -and $Path -eq "/study") {
+        Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\study.html") -ContentType "text/html"
+        return $true
+    }
+
+    if ($Request.method -eq "GET" -and $Path -eq "/calendar") {
+        Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\calendar.html") -ContentType "text/html"
+        return $true
+    }
+
     if ($Request.method -eq "GET" -and $Path -eq "/settings") {
         Send-JarvisTextFile -Stream $Request.stream -Path (Join-Path $PSScriptRoot "static\settings.html") -ContentType "text/html"
         return $true
@@ -244,6 +258,8 @@ function Handle-JarvisStaticRoute {
         "/index.html" = @{ file = "index.html"; type = "text/html" }
         "/finance.html" = @{ file = "finance.html"; type = "text/html" }
         "/organization.html" = @{ file = "organization.html"; type = "text/html" }
+        "/study.html" = @{ file = "study.html"; type = "text/html" }
+        "/calendar.html" = @{ file = "calendar.html"; type = "text/html" }
         "/settings.html" = @{ file = "settings.html"; type = "text/html" }
         "/service-worker.js" = @{ file = "service-worker.js"; type = "application/javascript" }
         "/jarvis-theme.css" = @{ file = "jarvis-theme.css"; type = "text/css" }
@@ -458,6 +474,228 @@ function Handle-JarvisFinanceApiRoute {
     return $false
 }
 
+function Handle-JarvisStudyApiRoute {
+    param(
+        $Request,
+        [string]$Path
+    )
+
+    if ($Request.method -eq "GET" -and $Path -eq "/api/study/summary") {
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{
+            ok = $true
+            study = (Get-StudySummary)
+            events = @(Get-CalendarVisibleEvents)
+            files = (Get-FilesSummary)
+        }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/subjects") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-StudySubject -Name $body.name -Status (Get-JarvisSafeText -Value $body.status -Fallback "cursando") -Year (Get-JarvisSafeText -Value $body.year) -Term (Get-JarvisSafeText -Value $body.term) -Professors (Get-JarvisSafeText -Value $body.professors) -Classroom (Get-JarvisSafeText -Value $body.classroom) -EvaluationMethod (Get-JarvisSafeText -Value $body.evaluation_method) -ScheduleNotes (Get-JarvisSafeText -Value $body.schedule_notes) -Color (Get-JarvisSafeText -Value $body.color -Fallback "#8B5CF6") | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/subjects/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-StudySubject -Id $body.id -Name $body.name -Status (Get-JarvisSafeText -Value $body.status -Fallback "cursando") -Year (Get-JarvisSafeText -Value $body.year) -Term (Get-JarvisSafeText -Value $body.term) -Professors (Get-JarvisSafeText -Value $body.professors) -Classroom (Get-JarvisSafeText -Value $body.classroom) -EvaluationMethod (Get-JarvisSafeText -Value $body.evaluation_method) -ScheduleNotes (Get-JarvisSafeText -Value $body.schedule_notes) -Color (Get-JarvisSafeText -Value $body.color -Fallback "#8B5CF6") | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/subjects/archive") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-StudySubject -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/topics") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-StudyTopic -SubjectId $body.subject_id -Title $body.title -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Progress ([int]$body.progress) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/topics/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-StudyTopic -Id $body.id -Title $body.title -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Progress ([int]$body.progress) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/topics/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-StudyTopic -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/evaluations") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-StudyEvaluation -SubjectId $body.subject_id -Title $body.title -Type (Get-JarvisSafeText -Value $body.type -Fallback "parcial") -Date $body.date -Time (Get-JarvisSafeText -Value $body.time) -Importance (Get-JarvisSafeText -Value $body.importance -Fallback "alta") -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Progress ([int]$body.progress) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/evaluations/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-StudyEvaluation -Id $body.id -Title $body.title -Type (Get-JarvisSafeText -Value $body.type -Fallback "parcial") -Date $body.date -Time (Get-JarvisSafeText -Value $body.time) -Importance (Get-JarvisSafeText -Value $body.importance -Fallback "alta") -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Progress ([int]$body.progress) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/evaluations/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-StudyEvaluation -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/assignments") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-StudyAssignment -SubjectId $body.subject_id -Title $body.title -Date $body.date -Time (Get-JarvisSafeText -Value $body.time) -Importance (Get-JarvisSafeText -Value $body.importance -Fallback "media") -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Progress ([int]$body.progress) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/assignments/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-StudyAssignment -Id $body.id -Title $body.title -Date $body.date -Time (Get-JarvisSafeText -Value $body.time) -Importance (Get-JarvisSafeText -Value $body.importance -Fallback "media") -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Progress ([int]$body.progress) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/assignments/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-StudyAssignment -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary); events = @(Get-CalendarVisibleEvents) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/notes") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-StudyNote -SubjectId $body.subject_id -Title (Get-JarvisSafeText -Value $body.title -Fallback "Nota") -Text $body.text -LinkedEntityType (Get-JarvisSafeText -Value $body.linked_entity_type) -LinkedEntityId (Get-JarvisSafeText -Value $body.linked_entity_id) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/notes/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-StudyNote -Id $body.id -Title (Get-JarvisSafeText -Value $body.title -Fallback "Nota") -Text $body.text | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/notes/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-StudyNote -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/schedules") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-StudySchedule -SubjectId $body.subject_id -DayOfWeek $body.day_of_week -StartsAt $body.starts_at -EndsAt (Get-JarvisSafeText -Value $body.ends_at) -Location (Get-JarvisSafeText -Value $body.location) -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/study/schedules/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-StudySchedule -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; study = (Get-StudySummary) }
+        return $true
+    }
+
+    return $false
+}
+
+function Handle-JarvisCalendarApiRoute {
+    param(
+        $Request,
+        [string]$Path
+    )
+
+    if ($Request.method -eq "GET" -and $Path -eq "/api/calendar/events") {
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; events = @(Get-CalendarVisibleEvents); study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/calendar/events") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-CalendarEvent -Title $body.title -Type (Get-JarvisSafeText -Value $body.type -Fallback "recordatorio") -Date $body.date -Time (Get-JarvisSafeText -Value $body.time) -Importance (Get-JarvisSafeText -Value $body.importance -Fallback "media") -SubjectId (Get-JarvisSafeText -Value $body.subject_id) -LinkedEntityType (Get-JarvisSafeText -Value $body.linked_entity_type) -LinkedEntityId (Get-JarvisSafeText -Value $body.linked_entity_id) -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; events = @(Get-CalendarVisibleEvents); study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/calendar/events/update") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Update-CalendarEvent -Id $body.id -Title $body.title -Type (Get-JarvisSafeText -Value $body.type -Fallback "recordatorio") -Date $body.date -Time (Get-JarvisSafeText -Value $body.time) -Importance (Get-JarvisSafeText -Value $body.importance -Fallback "media") -SubjectId (Get-JarvisSafeText -Value $body.subject_id) -LinkedEntityType (Get-JarvisSafeText -Value $body.linked_entity_type) -LinkedEntityId (Get-JarvisSafeText -Value $body.linked_entity_id) -Status (Get-JarvisSafeText -Value $body.status -Fallback "pendiente") -Notes (Get-JarvisSafeText -Value $body.notes) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; events = @(Get-CalendarVisibleEvents); study = (Get-StudySummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/calendar/events/delete") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Remove-CalendarEvent -Id $body.id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; events = @(Get-CalendarVisibleEvents); study = (Get-StudySummary) }
+        return $true
+    }
+
+    return $false
+}
+
+function Handle-JarvisFilesApiRoute {
+    param(
+        $Request,
+        [string]$Path
+    )
+
+    if ($Request.method -eq "GET" -and $Path -eq "/api/files/summary") {
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; files = (Get-FilesSummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/files/roots") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        Add-FileRoot -Path $body.path -Label (Get-JarvisSafeText -Value $body.label) | Out-Null
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; files = (Get-FilesSummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/files/scan") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        $result = Scan-FileRoot -RootId $body.root_id -TargetType (Get-JarvisSafeText -Value $body.target_type) -TargetId (Get-JarvisSafeText -Value $body.target_id) -Limit ([int](Get-JarvisSafeText -Value $body.limit -Fallback "500"))
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; result = $result; files = (Get-FilesSummary) }
+        return $true
+    }
+
+    if ($Request.method -eq "POST" -and $Path -eq "/api/files/open") {
+        $body = Get-JarvisJsonBody -Body $Request.body
+        $result = Open-FileAsset -FileId $body.file_id
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; result = $result }
+        return $true
+    }
+
+    return $false
+}
+
+function Handle-JarvisInsightsApiRoute {
+    param(
+        $Request,
+        [string]$Path
+    )
+
+    if ($Request.method -eq "GET" -and $Path -eq "/api/insights") {
+        Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{ ok = $true; insights = @(Get-JarvisInsights) }
+        return $true
+    }
+
+    return $false
+}
+
 function Get-JarvisBootstrapSnapshot {
     return [pscustomobject]@{
         schema_version = 1
@@ -471,6 +709,14 @@ function Get-JarvisBootstrapSnapshot {
             priorities = @(Read-FinancePriorities)
             payment_methods = @(Read-FinancePaymentMethods)
             settings = Read-FinanceSettings
+        }
+        study = Get-StudySummary
+        calendar = [pscustomobject]@{
+            events = @(Read-CalendarEvents)
+        }
+        files = [pscustomobject]@{
+            assets = @(Read-FileAssets)
+            links = @(Read-FileLinks)
         }
     }
 }
@@ -610,6 +856,10 @@ function Handle-JarvisRequest {
         if (Handle-JarvisPageRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisRecordsApiRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisFinanceApiRoute -Request $Request -Path $path) { return }
+        if (Handle-JarvisStudyApiRoute -Request $Request -Path $path) { return }
+        if (Handle-JarvisCalendarApiRoute -Request $Request -Path $path) { return }
+        if (Handle-JarvisFilesApiRoute -Request $Request -Path $path) { return }
+        if (Handle-JarvisInsightsApiRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisBootstrapApiRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisSyncApiRoute -Request $Request -Path $path) { return }
 
@@ -659,6 +909,9 @@ function Start-JarvisWebServer {
 
     Initialize-JarvisStorage -ProjectRoot $ProjectRoot
     Initialize-FinanceStorage -ProjectRoot $ProjectRoot
+    Initialize-CalendarStorage -ProjectRoot $ProjectRoot
+    Initialize-StudyStorage -ProjectRoot $ProjectRoot
+    Initialize-FilesStorage -ProjectRoot $ProjectRoot
     Initialize-JarvisSyncStorage
 
     if ($SmokeTest) {
@@ -666,11 +919,13 @@ function Start-JarvisWebServer {
         $financeHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\finance.html"), [System.Text.Encoding]::UTF8)
         $organizationHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\organization.html"), [System.Text.Encoding]::UTF8)
         $settingsHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\settings.html"), [System.Text.Encoding]::UTF8)
+        $studyHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\study.html"), [System.Text.Encoding]::UTF8)
+        $calendarHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\calendar.html"), [System.Text.Encoding]::UTF8)
         $records = @(Read-JarvisRecords)
         $bootstrap = Get-JarvisBootstrapSnapshot
         [void](Get-JarvisQuickCapture -Text "tengo que estudiar")
         $syncStatus = Get-JarvisSyncStatus
-        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Configuracion: $($settingsHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
+        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Estudio: $($studyHtml.Length) Calendario: $($calendarHtml.Length) Configuracion: $($settingsHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
         return
     }
 

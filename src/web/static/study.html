@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Estudio</title>
+  <meta name="theme-color" content="#8B5CF6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .study-page { display:grid; gap:16px; }
+    .study-layout { display:grid; gap:16px; align-items:start; }
+    .study-list-view.is-hidden, .study-detail-view.is-hidden { display:none; }
+    .subject-list-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:14px; }
+    .subject-create-form { max-width:520px; }
+    .subject-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+    .subject-card { width:100%; min-height:106px; display:flex; flex-direction:column; align-items:flex-start; justify-content:space-between; gap:10px; text-align:left; background:var(--color-bg-secondary); border:1px solid var(--border-main); border-radius:14px; padding:14px; }
+    .subject-card:hover { border-color:rgba(192,132,252,.55); }
+    .subject-card-main { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; width:100%; }
+    .subject-card-title { font-size:1rem; font-weight:800; color:var(--text-main); }
+    .subject-card-meta { color:var(--text-tertiary); font-size:.9rem; line-height:1.35; }
+    .compact-form { display:grid; gap:10px; }
+    .row-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .row-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .section-stack { display:grid; gap:10px; }
+    details.study-section { background:var(--color-surface); border:1px solid var(--border-secondary); border-radius:14px; padding:12px; }
+    details.study-section summary { cursor:pointer; font-weight:800; color:var(--text-main); }
+    details.study-section summary span { color:var(--text-tertiary); font-weight:600; }
+    .subject-detail-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
+    .section-actions { justify-content:flex-end; }
+    .item-row { display:grid; grid-template-columns:minmax(0,1fr) 128px 96px; gap:8px; align-items:start; padding:10px 0; border-bottom:1px solid var(--divider-subtle); }
+    .item-row:last-child { border-bottom:0; }
+    .file-row { display:grid; grid-template-columns:minmax(0,1fr) 120px; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--divider-subtle); }
+    .mini-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .mini-actions button { width:auto; min-height:38px; padding:8px 10px; }
+    @media (max-width:900px) {
+      .study-layout, .row-2, .row-3, .item-row, .file-row { grid-template-columns:1fr; }
+      .subject-list-head { display:grid; }
+      .subject-create-form { max-width:none; }
+      .subject-detail-head { display:grid; }
+      .section-actions { justify-content:stretch; }
+      .mini-actions button { width:100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Jarvis estudio</p>
+      <h1>Estudio</h1>
+      <p class="subtitle">Materias, fechas academicas, temas, trabajos, notas y archivos en un solo lugar.</p>
+    </div>
+  </header>
+
+  <main>
+    <div data-jarvis-nav="study"></div>
+
+    <div class="study-page">
+      <section class="panel">
+        <div class="row-3">
+          <div class="card"><span>Materias activas</span><strong id="activeSubjects">0</strong></div>
+          <div class="card"><span>Evaluaciones pendientes</span><strong id="pendingEvaluations">0</strong></div>
+          <div class="card"><span>TP pendientes</span><strong id="pendingAssignments">0</strong></div>
+        </div>
+      </section>
+
+      <div id="subjectStatus" class="status"></div>
+
+      <div class="study-layout">
+        <section id="subjectListPanel" class="panel study-list-view">
+          <div class="subject-list-head">
+            <div>
+              <h2>Materias</h2>
+              <p class="muted">Elegí una materia para ver su información, temas, evaluaciones, TP, notas y archivos.</p>
+            </div>
+            <div class="compact-form subject-create-form">
+              <input id="newSubjectName" placeholder="Nueva materia">
+              <div class="row-2">
+                <select id="newSubjectStatus">
+                  <option value="cursando">Cursando</option>
+                  <option value="final_pendiente">Final pendiente</option>
+                  <option value="recursando">Recursando</option>
+                  <option value="aprobada">Aprobada</option>
+                </select>
+                <button onclick="addSubject()">Crear</button>
+              </div>
+            </div>
+          </div>
+          <div id="subjectList" class="subject-list"></div>
+        </section>
+
+        <section id="subjectDetail" class="panel study-detail-view is-hidden">
+          <h2>Seleccioná una materia</h2>
+          <p class="muted">Seleccioná una materia para ver su información.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let study = { subjects:[], topics:[], evaluations:[], assignments:[], notes:[], schedules:[] };
+    let events = [];
+    let files = { assets:[], links:[], roots:[], locations:[] };
+    let selectedSubjectId = "";
+    const studySectionNames = ["info", "topics", "evaluations", "assignments", "notes", "files", "photos", "schedules"];
+
+    function visible(items) {
+      return (items || []).filter((item) => !safeText(item.deleted_at));
+    }
+
+    function currentSubject() {
+      if (!selectedSubjectId) return null;
+      return visible(study.subjects).find((subject) => subject.id === selectedSubjectId) || null;
+    }
+
+    function bySubject(items) {
+      const subject = currentSubject();
+      if (!subject) return [];
+      return visible(items).filter((item) => item.subject_id === subject.id);
+    }
+
+    function eventFor(item) {
+      return events.find((event) => event.id === item.calendar_event_id) || null;
+    }
+
+    function dateParts(value) {
+      const text = safeText(value);
+      return { date:text.slice(0, 10), time:text.length >= 16 ? text.slice(11, 16) : "" };
+    }
+
+    function statusLabel(value) {
+      const labels = {
+        cursando:"Cursando",
+        final_pendiente:"Final pendiente",
+        aprobada:"Aprobada",
+        recursando:"Recursando",
+        archivada:"Archivada"
+      };
+      return labels[value] || safeText(value, "Sin estado");
+    }
+
+    function nextSubjectEvent(subject) {
+      const linkedIds = new Set([
+        ...visible(study.evaluations),
+        ...visible(study.assignments)
+      ].filter((item) => item.subject_id === subject.id).map((item) => item.calendar_event_id));
+      const today = new Date().toISOString().slice(0, 10);
+      return events
+        .filter((event) => !safeText(event.deleted_at))
+        .filter((event) => event.subject_id === subject.id || linkedIds.has(event.id))
+        .filter((event) => dateParts(event.starts_at).date >= today)
+        .sort((a, b) => safeText(a.starts_at).localeCompare(safeText(b.starts_at)))[0] || null;
+    }
+
+    function subjectMeta(subject) {
+      const nextEvent = nextSubjectEvent(subject);
+      if (nextEvent) {
+        const parts = dateParts(nextEvent.starts_at);
+        return `Próximo: ${nextEvent.title} · ${parts.date}${parts.time ? ` ${parts.time}` : ""}`;
+      }
+      if (safeText(subject.professors)) return `Profesor: ${subject.professors}`;
+      if (safeText(subject.year) || safeText(subject.term)) return `${safeText(subject.year)} ${safeText(subject.term)}`.trim();
+      return "Sin próxima fecha cargada.";
+    }
+
+    function sectionKey(name) {
+      const subject = currentSubject();
+      return `jarvis_study_section_${subject?.id || "none"}_${name}`;
+    }
+
+    function rememberSectionState(event) {
+      const target = event.currentTarget;
+      localStorage.setItem(sectionKey(target.dataset.section), target.open ? "open" : "closed");
+    }
+
+    function sectionOpen(name, fallback = false) {
+      const value = localStorage.getItem(sectionKey(name));
+      if (!value) return fallback;
+      return value === "open";
+    }
+
+    async function loadStudy() {
+      const data = await api("/api/study/summary");
+      study = data.study || study;
+      events = data.events || [];
+      files = data.files || files;
+      try {
+        const fileData = await serverApi("/api/files/summary");
+        if (fileData.ok) files = fileData.files || files;
+      } catch {}
+      if (!visible(study.subjects).some((subject) => subject.id === selectedSubjectId)) {
+        selectedSubjectId = "";
+      }
+      render();
+    }
+
+    function render() {
+      const subjects = visible(study.subjects);
+      const active = subjects.filter((subject) => subject.status !== "archivada");
+      $("activeSubjects").textContent = active.length;
+      $("pendingEvaluations").textContent = visible(study.evaluations).filter((item) => item.status !== "completada").length;
+      $("pendingAssignments").textContent = visible(study.assignments).filter((item) => item.status !== "completada").length;
+
+      $("subjectList").innerHTML = subjects.map((subject) => `
+        <button class="subject-card" onclick="selectSubject('${subject.id}')">
+          <span class="subject-card-main">
+            <span class="subject-card-title">${escapeHtml(subject.name)}</span>
+            <span class="pill">${escapeHtml(statusLabel(subject.status))}</span>
+          </span>
+          <span class="subject-card-meta">${escapeHtml(subjectMeta(subject))}</span>
+        </button>
+      `).join("") || `<p class="muted">Crea tu primera materia.</p>`;
+
+      const hasSelectedSubject = Boolean(currentSubject());
+      $("subjectListPanel").classList.toggle("is-hidden", hasSelectedSubject);
+      $("subjectDetail").classList.toggle("is-hidden", !hasSelectedSubject);
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const subject = currentSubject();
+      if (!subject) {
+        $("subjectDetail").innerHTML = `<h2>Seleccioná una materia</h2><p class="muted">Seleccioná una materia para ver su información.</p>`;
+        return;
+      }
+
+      const topics = bySubject(study.topics);
+      const evaluations = bySubject(study.evaluations);
+      const assignments = bySubject(study.assignments);
+      const notes = bySubject(study.notes);
+      const schedules = bySubject(study.schedules);
+      const subjectLinks = visible(files.links).filter((link) => link.target_type === "subject" && link.target_id === subject.id);
+      const linkedAssets = subjectLinks.map((link) => visible(files.assets).find((asset) => asset.id === link.file_id)).filter(Boolean);
+      const photos = linkedAssets.filter((asset) => asset.kind === "photo");
+      const documents = linkedAssets.filter((asset) => asset.kind !== "photo");
+
+      $("subjectDetail").innerHTML = `
+        <button class="secondary" onclick="backToSubjects()" style="width:auto;margin-bottom:12px">← Volver a materias</button>
+        <div class="subject-detail-head">
+          <div>
+            <h2>${escapeHtml(subject.name)}</h2>
+            <p class="muted"><span class="pill">${escapeHtml(statusLabel(subject.status))}</span> ${escapeHtml(subject.year)} ${escapeHtml(subject.term)}</p>
+          </div>
+          <div class="mini-actions section-actions">
+            <button class="secondary" onclick="setAllSections(true)">Expandir todo</button>
+            <button class="secondary" onclick="setAllSections(false)">Colapsar todo</button>
+          </div>
+        </div>
+        <div class="section-stack">
+          ${infoSection(subject)}
+          ${topicsSection(topics)}
+          ${evaluationsSection(evaluations)}
+          ${assignmentsSection(assignments)}
+          ${notesSection(notes)}
+          ${filesSection(documents, photos)}
+          ${schedulesSection(schedules)}
+        </div>
+      `;
+      document.querySelectorAll("details.study-section").forEach((details) => {
+        details.addEventListener("toggle", rememberSectionState);
+      });
+    }
+
+    function infoSection(subject) {
+      return `
+        <details class="study-section" data-section="info" ${sectionOpen("info", true) ? "open" : ""}>
+          <summary>Informacion <span>datos principales</span></summary>
+          <div class="compact-form" style="margin-top:12px">
+            <div class="row-2">
+              <input id="subjectName" value="${escapeHtml(subject.name)}" placeholder="Nombre">
+              <select id="subjectStatusInput">
+                ${["cursando","final_pendiente","aprobada","recursando","archivada"].map((status) => `<option value="${status}" ${subject.status === status ? "selected" : ""}>${status}</option>`).join("")}
+              </select>
+            </div>
+            <div class="row-2">
+              <input id="subjectYear" value="${escapeHtml(subject.year)}" placeholder="Año">
+              <input id="subjectTerm" value="${escapeHtml(subject.term)}" placeholder="Cuatrimestre">
+            </div>
+            <div class="row-2">
+              <input id="subjectProfessors" value="${escapeHtml(subject.professors)}" placeholder="Profesores">
+              <input id="subjectClassroom" value="${escapeHtml(subject.classroom)}" placeholder="Aula">
+            </div>
+            <textarea id="subjectEvaluationMethod" placeholder="Forma de evaluacion">${escapeHtml(subject.evaluation_method)}</textarea>
+            <textarea id="subjectScheduleNotes" placeholder="Horarios y observaciones">${escapeHtml(subject.schedule_notes)}</textarea>
+            <div class="mini-actions">
+              <button onclick="saveSubjectInfo()">Guardar informacion</button>
+              <button class="secondary" onclick="archiveSubject()">Archivar materia</button>
+            </div>
+          </div>
+        </details>
+      `;
+    }
+
+    function topicsSection(topics) {
+      return `
+        <details class="study-section" data-section="topics" ${sectionOpen("topics", true) ? "open" : ""}>
+          <summary>Temas <span>${topics.length}</span></summary>
+          <div class="compact-form" style="margin-top:12px">
+            <div class="row-3">
+              <input id="topicTitle" placeholder="Tema">
+              <select id="topicStatus"><option value="pendiente">Pendiente</option><option value="en_progreso">En progreso</option><option value="hecho">Hecho</option></select>
+              <input id="topicProgress" type="number" min="0" max="100" value="0" placeholder="Progreso">
+            </div>
+            <textarea id="topicNotes" placeholder="Notas del tema"></textarea>
+            <button onclick="addTopic()">Agregar tema</button>
+          </div>
+          ${topics.map((topic) => `
+            <div class="item-row">
+              <div>
+                <input id="topicTitle-${topic.id}" value="${escapeHtml(topic.title)}">
+                <textarea id="topicNotes-${topic.id}" placeholder="Notas">${escapeHtml(topic.notes)}</textarea>
+              </div>
+              <div>
+                <select id="topicStatus-${topic.id}">
+                  ${["pendiente","en_progreso","hecho"].map((status) => `<option value="${status}" ${topic.status === status ? "selected" : ""}>${status}</option>`).join("")}
+                </select>
+                <input id="topicProgress-${topic.id}" type="number" min="0" max="100" value="${Number(topic.progress || 0)}">
+              </div>
+              <div class="mini-actions"><button onclick="saveTopic('${topic.id}')">Guardar</button><button class="danger" onclick="deleteTopic('${topic.id}')">Borrar</button></div>
+            </div>
+          `).join("") || `<p class="muted">Todavia no hay temas.</p>`}
+        </details>
+      `;
+    }
+
+    function evaluationsSection(items) {
+      return calendarBackedSection("evaluations", "Evaluaciones", items, "/api/study/evaluations", ["parcial","final","exposicion"]);
+    }
+
+    function assignmentsSection(items) {
+      return calendarBackedSection("assignments", "TP", items, "/api/study/assignments", ["tp"]);
+    }
+
+    function calendarBackedSection(kind, title, items, endpoint, types) {
+      return `
+        <details class="study-section" data-section="${kind}" ${sectionOpen(kind, true) ? "open" : ""}>
+          <summary>${title} <span>${items.length}</span></summary>
+          <div class="compact-form" style="margin-top:12px">
+            <div class="row-3">
+              <input id="${kind}Title" placeholder="Titulo">
+              <select id="${kind}Type">${types.map((type) => `<option value="${type}">${type}</option>`).join("")}</select>
+              <input id="${kind}Date" type="date">
+            </div>
+            <div class="row-3">
+              <input id="${kind}Time" type="time">
+              <select id="${kind}Importance"><option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option></select>
+              <input id="${kind}Progress" type="number" min="0" max="100" value="0">
+            </div>
+            <textarea id="${kind}Notes" placeholder="Notas"></textarea>
+            <button onclick="addCalendarBacked('${kind}', '${endpoint}')">Agregar</button>
+          </div>
+          ${items.map((item) => {
+            const event = eventFor(item);
+            const parts = dateParts(event?.starts_at);
+            return `
+              <div class="item-row">
+                <div>
+                  <input id="${kind}Title-${item.id}" value="${escapeHtml(item.title)}">
+                  <textarea id="${kind}Notes-${item.id}" placeholder="Notas">${escapeHtml(item.notes)}</textarea>
+                </div>
+                <div>
+                  <input id="${kind}Date-${item.id}" type="date" value="${escapeHtml(parts.date)}">
+                  <input id="${kind}Time-${item.id}" type="time" value="${escapeHtml(parts.time)}">
+                  <input id="${kind}Progress-${item.id}" type="number" min="0" max="100" value="${Number(item.progress || 0)}">
+                </div>
+                <div class="mini-actions"><button onclick="saveCalendarBacked('${kind}', '${endpoint}', '${item.id}')">Guardar</button><button class="danger" onclick="deleteCalendarBacked('${endpoint}', '${item.id}')">Borrar</button></div>
+              </div>
+            `;
+          }).join("") || `<p class="muted">Todavia no hay ${title.toLowerCase()}.</p>`}
+        </details>
+      `;
+    }
+
+    function notesSection(notes) {
+      return `
+        <details class="study-section" data-section="notes" ${sectionOpen("notes") ? "open" : ""}>
+          <summary>Notas <span>${notes.length}</span></summary>
+          <div class="compact-form" style="margin-top:12px">
+            <input id="noteTitle" placeholder="Titulo">
+            <textarea id="noteText" placeholder="Nota"></textarea>
+            <button onclick="addNote()">Agregar nota</button>
+          </div>
+          ${notes.map((note) => `
+            <div class="item-row">
+              <div><input id="noteTitle-${note.id}" value="${escapeHtml(note.title)}"><textarea id="noteText-${note.id}">${escapeHtml(note.text)}</textarea></div>
+              <div></div>
+              <div class="mini-actions"><button onclick="saveNote('${note.id}')">Guardar</button><button class="danger" onclick="deleteNote('${note.id}')">Borrar</button></div>
+            </div>
+          `).join("") || `<p class="muted">Todavia no hay notas.</p>`}
+        </details>
+      `;
+    }
+
+    function filesSection(documents, photos) {
+      const roots = files.roots || [];
+      const fileList = (items) => items.map((asset) => `
+        <div class="file-row"><div><strong>${escapeHtml(asset.display_name)}</strong><br><span class="muted">${escapeHtml(asset.kind)} ${Number(asset.size || 0)} bytes</span></div><button class="light" onclick="openFile('${asset.id}')">Abrir</button></div>
+      `).join("") || `<p class="muted">Sin archivos vinculados.</p>`;
+      return `
+        <details class="study-section" data-section="files" ${sectionOpen("files") ? "open" : ""}>
+          <summary>Archivos <span>${documents.length}</span></summary>
+          <div class="compact-form" style="margin-top:12px">
+            <input id="fileRootPath" placeholder="Ruta de carpeta autorizada en notebook">
+            <div class="row-2">
+              <button onclick="addFileRoot()">Autorizar carpeta</button>
+              <select id="fileRootSelect">${roots.map((root) => `<option value="${root.id}">${escapeHtml(root.label || root.path)}</option>`).join("")}</select>
+            </div>
+            <button class="light" onclick="scanFiles()">Listar y vincular archivos a esta materia</button>
+          </div>
+          ${fileList(documents)}
+        </details>
+        <details class="study-section" data-section="photos" ${sectionOpen("photos") ? "open" : ""}>
+          <summary>Fotos <span>${photos.length}</span></summary>
+          ${fileList(photos)}
+        </details>
+      `;
+    }
+
+    function schedulesSection(schedules) {
+      const days = [["monday","Lunes"],["tuesday","Martes"],["wednesday","Miercoles"],["thursday","Jueves"],["friday","Viernes"],["saturday","Sabado"],["sunday","Domingo"]];
+      return `
+        <details class="study-section" data-section="schedules" ${sectionOpen("schedules") ? "open" : ""}>
+          <summary>Horarios <span>${schedules.length}</span></summary>
+          <div class="compact-form" style="margin-top:12px">
+            <div class="row-3">
+              <select id="scheduleDay">${days.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select>
+              <input id="scheduleStart" type="time">
+              <input id="scheduleEnd" type="time">
+            </div>
+            <input id="scheduleLocation" placeholder="Aula o lugar">
+            <button onclick="addSchedule()">Agregar horario</button>
+          </div>
+          ${schedules.map((schedule) => `
+            <div class="file-row"><div>${escapeHtml(schedule.day_of_week)} ${escapeHtml(schedule.starts_at)}-${escapeHtml(schedule.ends_at)} <span class="muted">${escapeHtml(schedule.location)}</span></div><button class="danger" onclick="deleteSchedule('${schedule.id}')">Borrar</button></div>
+          `).join("") || `<p class="muted">Todavia no hay horarios.</p>`}
+        </details>
+      `;
+    }
+
+    async function refreshAfter(action, message = "Guardado.") {
+      $("subjectStatus").textContent = "";
+      await action();
+      $("subjectStatus").textContent = message;
+      await loadStudy();
+    }
+
+    async function addSubject() {
+      try {
+        const name = $("newSubjectName").value;
+        await refreshAfter(() => api("/api/study/subjects", { name, status:$("newSubjectStatus").value }), "Materia creada.");
+        $("newSubjectName").value = "";
+      } catch (error) { $("subjectStatus").textContent = error.message; }
+    }
+
+    function selectSubject(id) {
+      selectedSubjectId = id;
+      render();
+    }
+
+    function backToSubjects() {
+      selectedSubjectId = "";
+      render();
+    }
+
+    function setAllSections(open) {
+      if (!currentSubject()) return;
+      studySectionNames.forEach((name) => localStorage.setItem(sectionKey(name), open ? "open" : "closed"));
+      renderDetail();
+    }
+
+    async function saveSubjectInfo() {
+      const subject = currentSubject();
+      await refreshAfter(() => api("/api/study/subjects/update", {
+        id:subject.id, name:$("subjectName").value, status:$("subjectStatusInput").value, year:$("subjectYear").value, term:$("subjectTerm").value,
+        professors:$("subjectProfessors").value, classroom:$("subjectClassroom").value, evaluation_method:$("subjectEvaluationMethod").value,
+        schedule_notes:$("subjectScheduleNotes").value, color:subject.color || "#8B5CF6"
+      }));
+    }
+
+    async function archiveSubject() {
+      const subject = currentSubject();
+      await refreshAfter(() => api("/api/study/subjects/archive", { id:subject.id }), "Materia archivada.");
+    }
+
+    async function addTopic() {
+      const subject = currentSubject();
+      await refreshAfter(() => api("/api/study/topics", { subject_id:subject.id, title:$("topicTitle").value, status:$("topicStatus").value, progress:$("topicProgress").value, notes:$("topicNotes").value }));
+    }
+
+    async function saveTopic(id) {
+      await refreshAfter(() => api("/api/study/topics/update", { id, title:$(`topicTitle-${id}`).value, status:$(`topicStatus-${id}`).value, progress:$(`topicProgress-${id}`).value, notes:$(`topicNotes-${id}`).value }));
+    }
+
+    async function deleteTopic(id) { await refreshAfter(() => api("/api/study/topics/delete", { id }), "Tema eliminado."); }
+
+    async function addCalendarBacked(kind, endpoint) {
+      const subject = currentSubject();
+      await refreshAfter(() => api(endpoint, {
+        subject_id:subject.id, title:$(`${kind}Title`).value, type:$(`${kind}Type`).value, date:$(`${kind}Date`).value, time:$(`${kind}Time`).value,
+        importance:$(`${kind}Importance`).value, progress:$(`${kind}Progress`).value, status:"pendiente", notes:$(`${kind}Notes`).value
+      }));
+    }
+
+    async function saveCalendarBacked(kind, endpoint, id) {
+      const source = kind === "evaluations" ? bySubject(study.evaluations).find((item) => item.id === id) : bySubject(study.assignments).find((item) => item.id === id);
+      await refreshAfter(() => api(`${endpoint}/update`, {
+        id, title:$(`${kind}Title-${id}`).value, type:source?.type || (kind === "evaluations" ? "parcial" : "tp"), date:$(`${kind}Date-${id}`).value,
+        time:$(`${kind}Time-${id}`).value, importance:"media", progress:$(`${kind}Progress-${id}`).value, status:"pendiente", notes:$(`${kind}Notes-${id}`).value
+      }));
+    }
+
+    async function deleteCalendarBacked(endpoint, id) { await refreshAfter(() => api(`${endpoint}/delete`, { id }), "Eliminado."); }
+
+    async function addNote() {
+      const subject = currentSubject();
+      await refreshAfter(() => api("/api/study/notes", { subject_id:subject.id, title:$("noteTitle").value, text:$("noteText").value }));
+    }
+
+    async function saveNote(id) { await refreshAfter(() => api("/api/study/notes/update", { id, title:$(`noteTitle-${id}`).value, text:$(`noteText-${id}`).value })); }
+    async function deleteNote(id) { await refreshAfter(() => api("/api/study/notes/delete", { id }), "Nota eliminada."); }
+
+    async function addSchedule() {
+      const subject = currentSubject();
+      await refreshAfter(() => api("/api/study/schedules", { subject_id:subject.id, day_of_week:$("scheduleDay").value, starts_at:$("scheduleStart").value, ends_at:$("scheduleEnd").value, location:$("scheduleLocation").value }));
+    }
+
+    async function deleteSchedule(id) { await refreshAfter(() => api("/api/study/schedules/delete", { id }), "Horario eliminado."); }
+
+    async function addFileRoot() {
+      try {
+        const data = await serverApi("/api/files/roots", { path:$("fileRootPath").value });
+        files = data.files || files;
+        $("subjectStatus").textContent = "Carpeta autorizada.";
+        renderDetail();
+      }
+      catch (error) { $("subjectStatus").textContent = error.message; }
+    }
+
+    async function scanFiles() {
+      const subject = currentSubject();
+      const rootId = $("fileRootSelect")?.value;
+      if (!rootId) { $("subjectStatus").textContent = "Primero autoriza una carpeta."; return; }
+      try {
+        const data = await serverApi("/api/files/scan", { root_id:rootId, target_type:"subject", target_id:subject.id, limit:500 });
+        files = data.files || files;
+        $("subjectStatus").textContent = "Archivos listados.";
+        renderDetail();
+      }
+      catch (error) { $("subjectStatus").textContent = error.message; }
+    }
+
+    async function openFile(fileId) {
+      try { await serverApi("/api/files/open", { file_id:fileId }); }
+      catch (error) { $("subjectStatus").textContent = error.message; }
+    }
+
+    loadStudy().catch((error) => $("subjectStatus").textContent = error.message);
+  </script>
+</body>
+</html>
