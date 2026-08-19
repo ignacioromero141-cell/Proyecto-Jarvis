@@ -327,9 +327,12 @@ function Handle-JarvisStaticRoute {
         "/work.html" = @{ file = "work.html"; type = "text/html" }
         "/personal.html" = @{ file = "personal.html"; type = "text/html" }
         "/settings.html" = @{ file = "settings.html"; type = "text/html" }
+        "/backup-compare.html" = @{ file = "backup-compare.html"; type = "text/html" }
+        "/backup-sandbox.html" = @{ file = "backup-sandbox.html"; type = "text/html" }
         "/service-worker.js" = @{ file = "service-worker.js"; type = "application/javascript" }
         "/jarvis-theme.css" = @{ file = "jarvis-theme.css"; type = "text/css" }
         "/jarvis-local-store.js" = @{ file = "jarvis-local-store.js"; type = "application/javascript" }
+        "/jarvis-backup.js" = @{ file = "jarvis-backup.js"; type = "application/javascript" }
         "/jarvis-shared.js" = @{ file = "jarvis-shared.js"; type = "application/javascript" }
         "/icons/icon.svg" = @{ file = "icons\icon.svg"; type = "image/svg+xml" }
         "/icons/maskable.svg" = @{ file = "icons\maskable.svg"; type = "image/svg+xml" }
@@ -338,6 +341,7 @@ function Handle-JarvisStaticRoute {
         "/icons/apple-touch-icon.png" = @{ file = "icons\apple-touch-icon.png"; type = "image/png"; binary = $true }
         "/static/jarvis-theme.css" = @{ file = "jarvis-theme.css"; type = "text/css" }
         "/static/jarvis-local-store.js" = @{ file = "jarvis-local-store.js"; type = "application/javascript" }
+        "/static/jarvis-backup.js" = @{ file = "jarvis-backup.js"; type = "application/javascript" }
         "/static/jarvis-shared.js" = @{ file = "jarvis-shared.js"; type = "application/javascript" }
         "/static/icons/icon.svg" = @{ file = "icons\icon.svg"; type = "image/svg+xml" }
         "/static/icons/maskable.svg" = @{ file = "icons\maskable.svg"; type = "image/svg+xml" }
@@ -1020,6 +1024,9 @@ function Start-JarvisWebServer {
         $financeHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\finance.html"), [System.Text.Encoding]::UTF8)
         $organizationHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\organization.html"), [System.Text.Encoding]::UTF8)
         $settingsHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\settings.html"), [System.Text.Encoding]::UTF8)
+        $backupCompareHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\backup-compare.html"), [System.Text.Encoding]::UTF8)
+        $backupSandboxHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\backup-sandbox.html"), [System.Text.Encoding]::UTF8)
+        $backupScript = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\jarvis-backup.js"), [System.Text.Encoding]::UTF8)
         $studyHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\study.html"), [System.Text.Encoding]::UTF8)
         $calendarHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\calendar.html"), [System.Text.Encoding]::UTF8)
         $wellbeingHtml = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "static\wellbeing.html"), [System.Text.Encoding]::UTF8)
@@ -1029,7 +1036,7 @@ function Start-JarvisWebServer {
         $bootstrap = Get-JarvisBootstrapSnapshot
         [void](Get-JarvisQuickCapture -Text "tengo que estudiar")
         $syncStatus = Get-JarvisSyncStatus
-        Write-Host "Jarvis web 0.5 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Estudio: $($studyHtml.Length) Calendario: $($calendarHtml.Length) Bienestar: $($wellbeingHtml.Length) Trabajo: $($workHtml.Length) Personal: $($personalHtml.Length) Configuracion: $($settingsHtml.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
+        Write-Host "Jarvis web 0.6 OK. HTML: $($html.Length) Finanzas: $($financeHtml.Length) Organizacion: $($organizationHtml.Length) Estudio: $($studyHtml.Length) Calendario: $($calendarHtml.Length) Bienestar: $($wellbeingHtml.Length) Trabajo: $($workHtml.Length) Personal: $($personalHtml.Length) Configuracion: $($settingsHtml.Length) Comparador: $($backupCompareHtml.Length) Sandbox: $($backupSandboxHtml.Length) BackupJS: $($backupScript.Length) Registros: $($records.Count) Bootstrap: $(@($bootstrap.records).Count) registros SyncChanges: $($syncStatus.change_count)"
         return
     }
 

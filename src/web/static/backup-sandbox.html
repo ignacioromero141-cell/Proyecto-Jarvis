@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Verificar restauración Jarvis</title><link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-backup.js"></script><script src="jarvis-shared.js"></script>
+  <style>.field{display:grid;gap:6px;margin:10px 0}.warning{border:1px solid #d97706;border-radius:12px;padding:12px;background:rgba(217,119,6,.1)}</style>
+</head>
+<body>
+  <header><div class="hero"><p class="eyebrow">Entorno separado</p><h1>Verificar una restauración</h1><p class="subtitle">Usa una IndexedDB de prueba y nunca abre ni modifica la base real.</p></div></header>
+  <main><div data-jarvis-nav="settings"></div><section class="panel">
+    <div class="warning">Base de prueba: <strong>jarvis-backup-restore-sandbox-v1</strong>. La identidad y localStorage reales no se modifican.</div>
+    <label class="field">Copia de seguridad<input id="sandboxFile" type="file" accept=".json,application/json"></label>
+    <label class="field">Contraseña<input id="sandboxPassword" type="password"></label>
+    <div class="actions"><button onclick="restoreSandbox()">Restaurar y verificar en sandbox</button><button class="light" onclick="clearSandbox()">Vaciar solamente el sandbox</button><a class="button light" href="settings.html">Volver</a></div>
+    <div id="sandboxStatus" class="status"></div><div id="sandboxResult"></div>
+  </section></main>
+  <script>
+    const SANDBOX_DB = "jarvis-backup-restore-sandbox-v1";
+    const STORES = ["records","finance_movements","finance_categories","finance_priorities","finance_payment_methods","finance_settings","calendar_events","study_subjects","study_topics","study_evaluations","study_assignments","study_notes","study_schedules","file_assets","file_links","local_file_roots","local_file_locations","sync_changes","sync_conflicts","metadata"];
+    const KEYS = { sync_changes:"change_id", sync_conflicts:"conflict_id", metadata:"key" };
+    function openSandbox() { return new Promise((resolve,reject)=>{ const request=indexedDB.open(SANDBOX_DB,1); request.onupgradeneeded=()=>{const db=request.result;STORES.forEach((name)=>{if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath:KEYS[name]||"id"});});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error("Cerrá otra pestaña del verificador y volvé a intentar.")); }); }
+    const access = { databaseName:SANDBOX_DB, databaseVersion:1, openDatabase:openSandbox };
+    function packageStorage(pkg){const values={jarvis_workspace_id:pkg.workspace_id||"",jarvis_device_id:pkg.device_id||"sandbox-device"};return{get length(){return Object.keys(values).length},key:i=>Object.keys(values)[i]??null,getItem:key=>values[key]??null};}
+    async function restoreSandbox(){try{const file=$("sandboxFile").files[0];if(!file)throw new Error("Seleccioná una copia.");$("sandboxStatus").textContent="Validando y restaurando en la base de prueba...";const pkg=await JarvisBackup.parseFileText(await file.text(),$("sandboxPassword").value);const storage=packageStorage(pkg);const preview=await JarvisBackup.createPreview(pkg,{access,storage});const result=await JarvisBackup.applyPreview(preview,{access,backupConfirmed:true});const restored=await JarvisBackup.createPackage({access,storage,origin:"sandbox://restore-test",protocol:"sandbox:"});const sourceEntities=pkg.statistics.total_entities||0;const restoredEntities=restored.statistics.total_entities||0;if(sourceEntities!==restoredEntities)throw new Error(`La verificación terminó con conteos distintos: ${sourceEntities} vs ${restoredEntities}.`);$("sandboxResult").innerHTML=`<p><strong>Restauración verificada.</strong> Entidades: ${restoredEntities}. Agregados: ${result.added}. Conflictos: ${result.conflicts}. Workspace probado: ${escapeHtml(pkg.workspace_id||"sin ID")}.</p>`;$("sandboxStatus").textContent="La copia se restauró correctamente en un entorno separado. La base real no cambió.";}catch(error){$("sandboxStatus").textContent=error.message;}}
+    async function clearSandbox(){try{const db=await openSandbox();db.close();await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(SANDBOX_DB);request.onsuccess=resolve;request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error("Cerrá otras pestañas del verificador."));});$("sandboxResult").innerHTML="";$("sandboxStatus").textContent="Se vació solamente la base sandbox. Los datos reales no se modificaron.";}catch(error){$("sandboxStatus").textContent=error.message;}}
+  </script>
+</body></html>

@@ -1651,5 +1651,21 @@
     scheduleAutomaticSync();
   }
 
-  window.JarvisLocalStore = { handle, deviceId, workspaceId, importNotebookSnapshotIfNeeded, syncStatus, syncWithNotebook, probeNotebook, connectionContext };
+  // Backup e inventario usan la misma conexion ya inicializada. Exponerla evita
+  // abrir o migrar otra base accidentalmente durante una exportacion.
+  window.JarvisLocalStore = {
+    handle,
+    deviceId,
+    workspaceId,
+    importNotebookSnapshotIfNeeded,
+    syncStatus,
+    syncWithNotebook,
+    probeNotebook,
+    connectionContext,
+    backupAccess:{
+      databaseName:DB_NAME,
+      databaseVersion:DB_VERSION,
+      openDatabase:openDb
+    }
+  };
 })();

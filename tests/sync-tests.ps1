@@ -32,6 +32,7 @@ function Initialize-TestJarvis {
 }
 
 $root = New-TestRoot
+try {
 Initialize-TestJarvis -Root $root
 
 $identity = Read-JarvisIdentity
@@ -143,3 +144,11 @@ Assert-True ($conflictResults[0].status -eq "conflict") "Conflicto no fue detect
 Assert-True (@(Read-JarvisSyncConflicts).Count -eq 1) "Conflicto no fue registrado."
 
 Write-Host "Jarvis sync tests OK"
+}
+finally {
+    $resolvedRoot = [IO.Path]::GetFullPath($root)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if ($resolvedRoot.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and (Split-Path $resolvedRoot -Leaf) -match '^jarvis-sync-test-[0-9a-f]{32}$' -and (Test-Path -LiteralPath $resolvedRoot)) {
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+    }
+}

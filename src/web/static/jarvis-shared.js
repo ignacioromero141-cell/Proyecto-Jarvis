@@ -105,7 +105,21 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     const scriptUrl = new URL("service-worker.js", new URL("./", document.baseURI));
     const scope = new URL("./", document.baseURI).pathname;
-    navigator.serviceWorker.register(scriptUrl, { scope }).catch((error) => {
+    navigator.serviceWorker.register(scriptUrl, { scope }).then((registration) => {
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if (!worker || !navigator.serviceWorker.controller) return;
+        worker.addEventListener("statechange", () => {
+          if (worker.state !== "installed" || document.getElementById("jarvis-update-ready")) return;
+          const notice = document.createElement("div");
+          notice.id = "jarvis-update-ready";
+          notice.className = "status";
+          notice.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;padding:12px;border-radius:12px;background:#111827;color:white;text-align:center";
+          notice.textContent = "Hay una actualización de Jarvis lista. Cerrá y volvé a abrir la aplicación cuando termines lo que estás haciendo.";
+          document.body.appendChild(notice);
+        });
+      });
+    }).catch((error) => {
       console.warn("No se pudo registrar el service worker de Jarvis.", error);
     });
   });

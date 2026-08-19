@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Comparar copias de Jarvis</title>
+  <link rel="stylesheet" href="jarvis-theme.css">
+  <script src="jarvis-backup.js"></script>
+  <script src="jarvis-shared.js"></script>
+  <style>
+    .source-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .source { border:1px solid var(--border-main); border-radius:14px; padding:12px; }
+    .field { display:grid; gap:6px; margin-top:8px; }
+    .summary-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .status-exclusive { color:#d97706; } .status-different { color:#dc2626; } .status-coincident { color:#16a34a; }
+    @media(max-width:760px){ .source-grid,.summary-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header><div class="hero"><p class="eyebrow">Fase 0</p><h1>Comparar copias</h1><p class="subtitle">Analiza orígenes sin importar ni modificar datos.</p></div></header>
+  <main>
+    <div data-jarvis-nav="settings"></div>
+    <section class="panel">
+      <h2>Seleccionar dos o tres copias</h2>
+      <p class="muted">Podés usar las exportaciones HTTPS, LAN y el paquete de inventario generado junto al backup de la notebook. Las contraseñas solo viven en memoria mientras esta página está abierta.</p>
+      <div class="source-grid">
+        <div class="source"><strong>Copia 1</strong><label class="field">Archivo<input id="file0" type="file" accept=".json,application/json"></label><label class="field">Contraseña<input id="password0" type="password"></label></div>
+        <div class="source"><strong>Copia 2</strong><label class="field">Archivo<input id="file1" type="file" accept=".json,application/json"></label><label class="field">Contraseña<input id="password1" type="password"></label></div>
+        <div class="source"><strong>Copia 3 (opcional)</strong><label class="field">Archivo<input id="file2" type="file" accept=".json,application/json"></label><label class="field">Contraseña<input id="password2" type="password"></label></div>
+      </div>
+      <div class="actions"><button onclick="compareSelected()">Comparar sin importar</button><a class="button light" href="settings.html">Volver a Configuración</a></div>
+      <div id="status" class="status"></div>
+    </section>
+    <section id="results" class="panel" hidden>
+      <h2>Resultado</h2>
+      <div id="sourceSummary"></div>
+      <div id="totals" class="summary-grid"></div>
+      <h3>Detalle por registro</h3>
+      <div style="overflow:auto;max-height:520px"><table><thead><tr><th>Store</th><th>ID</th><th>Estado</th><th>Presente en</th></tr></thead><tbody id="recordRows"></tbody></table></div>
+    </section>
+  </main>
+  <script>
+    async function compareSelected() {
+      try {
+        $("status").textContent = "Descifrando y validando copias...";
+        const packages = [];
+        for (let i = 0; i < 3; i++) {
+          const file = $(`file${i}`).files[0];
+          if (!file) continue;
+          packages.push(await JarvisBackup.parseFileText(await file.text(), $(`password${i}`).value));
+        }
+        const comparison = JarvisBackup.comparePackages(packages);
+        $("sourceSummary").innerHTML = comparison.sources.map((source) => `<p><strong>${source.index + 1}.</strong> ${escapeHtml(source.origin)} · workspace ${escapeHtml(source.workspace_id || "sin ID")} · device ${escapeHtml(source.device_id || "sin ID")} · ${escapeHtml(source.exported_at)}</p>`).join("");
+        $("totals").innerHTML = `<div class="card"><span>Coincidentes</span><strong>${comparison.totals.coincident}</strong></div><div class="card"><span>Diferentes</span><strong>${comparison.totals.different}</strong></div><div class="card"><span>Exclusivos</span><strong>${comparison.totals.exclusive}</strong></div>`;
+        $("recordRows").innerHTML = comparison.records.map((record) => `<tr><td>${escapeHtml(record.store)}</td><td>${escapeHtml(record.key)}</td><td class="status-${record.status === "coincidente" ? "coincident" : record.status}">${escapeHtml(record.status)}</td><td>${record.present_in.map((index) => index + 1).join(", ")}</td></tr>`).join("");
+        $("results").hidden = false;
+        $("status").textContent = "Comparación completa. No se modificó ningún dato.";
+      } catch (error) {
+        $("results").hidden = true;
+        $("status").textContent = error.message;
+      }
+    }
+  </script>
+</body>
+</html>

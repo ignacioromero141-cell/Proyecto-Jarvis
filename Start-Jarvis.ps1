@@ -1,6 +1,7 @@
 param(
     [int]$Port = 8765,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$PassThru
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +45,7 @@ try {
             return
         }
         if ($ownership.Owned) {
-            Show-JarvisMessage "Jarvis esta activo en el puerto $Port (PID $listenerPid), pero no responde. No se inicio otra copia. Usa 'Detener Jarvis' y luego volve a iniciar para recuperarlo de forma segura."
+            Show-JarvisMessage "Jarvis esta activo en el puerto $Port (PID $listenerPid), pero no responde. No se inicio otra copia. Usa 'Detener-Jarvis.vbs' y luego volve a iniciar para recuperarlo de forma segura."
             return
         }
         Show-JarvisMessage "El puerto $Port esta ocupado por otro proceso (PID $listenerPid). Jarvis no lo modifico ni intento iniciar otra instancia."
@@ -54,19 +55,15 @@ try {
     Remove-JarvisStaleRuntimeFiles -Paths $Paths
     $scriptPath = Join-Path $ProjectRoot "jarvis-web.ps1"
     $powerShellPath = (Get-Command powershell.exe).Source
-    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $processInfo.FileName = $powerShellPath
-    $processInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Port $Port -Quiet"
-    $processInfo.WorkingDirectory = $ProjectRoot
-    $processInfo.UseShellExecute = $true
-    $processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $process = [System.Diagnostics.Process]::Start($processInfo)
+    $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$scriptPath`"", "-Port", "$Port", "-Quiet")
+    $process = Start-Process -FilePath $powerShellPath -ArgumentList $arguments -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
 
     for ($attempt = 0; $attempt -lt 24; $attempt++) {
         Start-Sleep -Milliseconds 250
         $health = Invoke-JarvisHealthCheck -Port $Port -TimeoutMilliseconds 500
         if ($health -and $health.service -eq "jarvis-web" -and [int]$health.pid -eq $process.Id) {
             if (-not $NoBrowser) { Start-Process $Url }
+            if ($PassThru) { return $process }
             return
         }
         if ($process.HasExited) {
@@ -75,7 +72,7 @@ try {
         }
     }
 
-    Show-JarvisMessage "Jarvis se inicio con PID $($process.Id), pero no alcanzo a responder dentro de 6 segundos. No se detuvo automaticamente: usa 'Detener Jarvis' si necesitas recuperarlo."
+    Show-JarvisMessage "Jarvis se inicio con PID $($process.Id), pero no alcanzo a responder dentro de 6 segundos. No se detuvo automaticamente: usa 'Detener-Jarvis.vbs' si necesitas recuperarlo."
 }
 finally {
     try { $mutex.ReleaseMutex() } catch {}

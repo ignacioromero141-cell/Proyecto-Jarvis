@@ -1,4 +1,4 @@
-const JARVIS_CACHE = "jarvis-pwa-v23";
+const JARVIS_CACHE = "jarvis-pwa-v24-phase0-backup";
 
 const APP_SHELL = [
   "./",
@@ -11,9 +11,12 @@ const APP_SHELL = [
   "./work.html",
   "./personal.html",
   "./settings.html",
+  "./backup-compare.html",
+  "./backup-sandbox.html",
   "./manifest.webmanifest",
   "./jarvis-theme.css",
   "./jarvis-local-store.js",
+  "./jarvis-backup.js",
   "./jarvis-shared.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -48,6 +51,9 @@ self.addEventListener("fetch", (event) => {
 
   if (url.origin !== self.location.origin) return;
   if (url.pathname.includes("/api/")) return;
+  // Los datos privados y las copias seleccionadas por el usuario nunca forman
+  // parte del app shell. Solo se cachean recursos publicos de la aplicacion.
+  if (!["document", "script", "style", "image", "manifest", "font"].includes(request.destination)) return;
 
   if (request.mode === "navigate") {
     event.respondWith(

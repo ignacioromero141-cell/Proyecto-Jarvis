@@ -93,8 +93,9 @@ function Test-JarvisOwnedListener {
     param([string]$ProjectRoot, [int]$Port, [int]$ListenerPid, $Health, $Metadata)
 
     $root = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
-    if ($Health -and $Health.ok -and $Health.service -eq "jarvis-web" -and [int]$Health.pid -eq $ListenerPid -and [int]$Health.port -eq $Port) {
-        return [pscustomobject]@{ Owned = $true; Evidence = "health" }
+    $healthMatches = $Health -and $Health.ok -and $Health.service -eq "jarvis-web" -and [int]$Health.pid -eq $ListenerPid -and [int]$Health.port -eq $Port
+    if ($Health -and -not $healthMatches) {
+        return [pscustomobject]@{ Owned = $false; Evidence = "health-mismatch" }
     }
     if (-not $Metadata -or [int]$Metadata.pid -ne $ListenerPid -or [int]$Metadata.port -ne $Port) {
         return [pscustomobject]@{ Owned = $false; Evidence = "metadata-mismatch" }
@@ -121,9 +122,9 @@ function Test-JarvisOwnedListener {
         if ($commandLine -notmatch [regex]::Escape((Join-Path $root "jarvis-web.ps1"))) {
             return [pscustomobject]@{ Owned = $false; Evidence = "command-line-mismatch" }
         }
-        return [pscustomobject]@{ Owned = $true; Evidence = "metadata-and-command-line" }
+        return [pscustomobject]@{ Owned = $true; Evidence = $(if ($healthMatches) { "health-metadata-and-command-line" } else { "metadata-and-command-line" }) }
     }
-    return [pscustomobject]@{ Owned = $true; Evidence = "metadata-and-process-start" }
+    return [pscustomobject]@{ Owned = $true; Evidence = $(if ($healthMatches) { "health-metadata-and-process-start" } else { "metadata-and-process-start" }) }
 }
 
 function Remove-JarvisStaleRuntimeFiles {

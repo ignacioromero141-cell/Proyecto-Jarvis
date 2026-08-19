@@ -1,4 +1,4 @@
-# Jarvis 0.5
+# Jarvis 0.6
 
 Esta es la primera base de tu asistente personal local. Todavia no usa
 inteligencia artificial ni internet. Guarda datos simples en tu computadora.
@@ -33,6 +33,16 @@ seguir creciendo por modulos:
 2. En la notebook, entra a `http://localhost:8765`.
 3. Si queres probar desde iPhone, dejalo en la misma red Wi-Fi y usa una de las
    direcciones que aparezcan en la ventana.
+
+Para detener solamente el servidor web de este proyecto, hace doble clic en
+`Detener-Jarvis.vbs` o ejecuta `Detener-Jarvis.ps1`. El script valida el puerto,
+la identidad del proceso y la ruta del proyecto antes de detenerlo; nunca usa
+solamente un PID sin verificar.
+
+Opcionalmente, `Crear-Accesos-Directos.ps1` crea o actualiza en el escritorio
+los accesos “Iniciar Jarvis” y “Detener Jarvis” apuntando a esos scripts
+versionados. Un clon nuevo no depende de los `.lnk`: los lanzadores VBS y
+PowerShell viajan dentro del repositorio.
 
 Importante: si Windows pregunta por firewall, hay que permitir red privada para
 que el iPhone pueda verlo. Si no lo permitis, igual deberia funcionar en la
@@ -69,6 +79,29 @@ La pantalla para usarla desde la app esta en:
 ```text
 http://localhost:8765/settings
 ```
+
+## Copias de seguridad (Fase 0)
+
+En `Configuracion` se puede:
+
+- ver el inventario del IndexedDB del origen actual;
+- exportar una copia completa cifrada;
+- revisar una copia antes de combinarla;
+- comparar exportaciones HTTPS, LAN y notebook sin importarlas.
+
+La notebook se respalda con:
+
+```powershell
+.\Backup-Jarvis.ps1
+```
+
+El comando pide una contraseña y crea un archivo cifrado nuevo dentro de
+`backups/`. Para verificarlo sin tocar los datos reales, se restaura en una
+carpeta temporal vacia con `Restore-JarvisNotebookBackup.ps1`.
+
+El formato, cifrado, exclusiones y reglas de combinación estan documentados en
+`docs/backup-format-v1.md`. El mapa de almacenamiento esta en
+`docs/data-inventory.md`.
 
 ## Dashboard
 

@@ -42,16 +42,20 @@ try {
         return
     }
 
-    Stop-Process -Id $listenerPid -Force
+    for ($stopAttempt = 0; $stopAttempt -lt 3; $stopAttempt++) {
+        if (-not (Get-Process -Id $listenerPid -ErrorAction SilentlyContinue)) { break }
+        Stop-Process -Id $listenerPid -Force -ErrorAction Stop
+        try { Wait-Process -Id $listenerPid -Timeout 2 -ErrorAction SilentlyContinue } catch {}
+    }
     for ($attempt = 0; $attempt -lt 24; $attempt++) {
         Start-Sleep -Milliseconds 250
-        if (-not (Get-JarvisListenerPid -Port $Port)) {
+        if (-not (Get-JarvisListenerPid -Port $Port) -and -not (Get-Process -Id $listenerPid -ErrorAction SilentlyContinue)) {
             Remove-JarvisStaleRuntimeFiles -Paths $Paths
             Show-JarvisMessage "Jarvis fue detenido de forma segura."
             return
         }
     }
-    Show-JarvisMessage "Se envio la orden de detencion a Jarvis PID $listenerPid, pero el puerto $Port sigue ocupado. No se modifico ningun otro proceso."
+    Show-JarvisMessage "Se envio la orden de detencion a Jarvis PID $listenerPid, pero el proceso o el puerto siguen activos. No se modifico ningun otro proceso."
 }
 finally {
     try { $mutex.ReleaseMutex() } catch {}

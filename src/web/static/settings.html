@@ -14,6 +14,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="jarvis-theme.css">
   <script src="jarvis-local-store.js"></script>
+  <script src="jarvis-backup.js"></script>
   <script src="jarvis-shared.js"></script>
   <style>
     .settings-page { display:grid; gap:16px; }
@@ -24,6 +25,14 @@
     .code-box { width:100%; min-height:92px; word-break:break-all; white-space:pre-wrap; }
     .conflict-card { display:grid; gap:10px; background:var(--color-surface-elevated); border:1px solid var(--border-secondary); border-radius:16px; padding:14px; }
     .version-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .data-table { width:100%; }
+    .data-table td:last-child, .data-table th:last-child { text-align:right; }
+    .warning-box { border:1px solid #d97706; background:rgba(217,119,6,.1); border-radius:12px; padding:12px; }
+    .success-box { border:1px solid #16a34a; background:rgba(22,163,74,.1); border-radius:12px; padding:12px; }
+    .backup-options { display:grid; gap:10px; }
+    .check-row { display:flex; align-items:flex-start; gap:8px; color:var(--text-secondary); }
+    .check-row input { width:auto; margin-top:3px; }
+    .preview-summary { display:grid; gap:10px; margin-top:12px; }
     pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--color-bg-secondary); color:var(--text-secondary); border:1px solid var(--border-main); border-radius:12px; padding:10px; max-height:260px; overflow:auto; }
     @media (max-width:760px) {
       .grid-2, .grid-3, .version-grid { grid-template-columns:1fr; }
@@ -114,6 +123,69 @@
         </table>
       </section>
 
+      <section class="panel" id="dataDiagnostics">
+        <h2>Diagnostico de datos</h2>
+        <p class="muted">Este inventario distingue los datos guardados de los cambios que esperan sincronizacion. Por eso “Enviados: 0 / Recibidos: 0” no significa que la base este vacia.</p>
+        <div class="grid-3">
+          <div class="card"><span>Origen actual</span><strong id="inventoryOrigin">-</strong></div>
+          <div class="card"><span>IndexedDB</span><strong id="inventoryDatabase">-</strong></div>
+          <div class="card"><span>Registros de entidades</span><strong id="inventoryEntities">0</strong></div>
+        </div>
+        <div class="grid-3" style="margin-top:12px">
+          <div class="card"><span>Pendientes</span><strong id="inventoryPending">0</strong></div>
+          <div class="card"><span>Historicos/confirmados</span><strong id="inventoryConfirmed">0</strong></div>
+          <div class="card"><span>Conflictos</span><strong id="inventoryConflicts">0</strong></div>
+        </div>
+        <p id="inventoryDetail" class="muted"></p>
+        <table class="data-table">
+          <thead><tr><th>Object store</th><th>Registros</th></tr></thead>
+          <tbody id="inventoryStores"><tr><td colspan="2">Leyendo inventario...</td></tr></tbody>
+        </table>
+        <div class="actions"><button class="light" onclick="loadDataInventory()">Actualizar inventario</button></div>
+        <div id="inventoryStatus" class="status"></div>
+      </section>
+
+      <section class="panel" id="backupExport">
+        <h2>Exportar copia de seguridad</h2>
+        <p>La copia incluye todos los object stores, historial, conflictos, cursores, identidad y configuracion local de este origen.</p>
+        <div class="warning-box">La copia completa contiene la credencial de sincronizacion LAN. Mantenela cifrada y no compartas la contraseña.</div>
+        <div class="grid-2" style="margin-top:12px">
+          <label class="field">Contraseña de la copia
+            <input id="exportPassword" type="password" autocomplete="new-password" minlength="10" placeholder="Minimo 10 caracteres">
+          </label>
+          <label class="field">Repetir contraseña
+            <input id="exportPasswordConfirm" type="password" autocomplete="new-password" minlength="10">
+          </label>
+        </div>
+        <label class="check-row" style="margin-top:12px"><input id="plainExport" type="checkbox"> <span>Opcion avanzada: exportar sin cifrar. El archivo quedara legible y puede exponer datos personales y la credencial LAN.</span></label>
+        <div class="actions"><button onclick="exportBackup(false)">Exportar copia de seguridad</button></div>
+        <div id="exportStatus" class="status"></div>
+      </section>
+
+      <section class="panel" id="backupImport">
+        <h2>Importar copia</h2>
+        <p>Primero se revisa el archivo. Seleccionarlo no modifica ningun dato.</p>
+        <div class="grid-2">
+          <label class="field">Archivo de copia
+            <input id="importFile" type="file" accept=".json,application/json">
+          </label>
+          <label class="field">Contraseña (si esta cifrado)
+            <input id="importPassword" type="password" autocomplete="current-password">
+          </label>
+        </div>
+        <div class="actions"><button onclick="reviewImport()">Revisar antes de importar</button></div>
+        <div id="importStatus" class="status"></div>
+        <div id="importPreview" class="preview-summary" hidden></div>
+        <div id="importActions" hidden>
+          <div class="warning-box">La combinacion conserva la identidad y el device ID actuales. Los registros diferentes no se pisan: se convierten en conflictos visibles.</div>
+          <div class="actions">
+            <button class="light" onclick="downloadPreImportBackup()">1. Descargar respaldo previo</button>
+            <button id="applyImportButton" onclick="applyReviewedImport()" disabled>2. Aplicar combinacion segura</button>
+          </div>
+        </div>
+        <p style="margin-top:14px"><a href="backup-compare.html">Comparar copias sin importarlas</a> · <a href="backup-sandbox.html">Verificar una restauración en una base de prueba</a></p>
+      </section>
+
       <section class="panel">
         <h2>Conflictos pendientes</h2>
         <div id="conflicts"></div>
@@ -123,6 +195,8 @@
 
   <script>
     let currentStatus = null;
+    let reviewedImport = null;
+    let preImportBackupReady = false;
 
     function shortId(value) {
       const text = safeText(value, "-");
@@ -153,6 +227,126 @@
       $("connectionDetail").textContent = `App: ${context.app_origin || location.origin}. URL notebook: ${currentStatus.notebook_url || "sin configurar"}. Ultimo contacto: ${formatDate(currentStatus.last_contact_at)}.`;
       renderDevices(currentStatus.linked_devices || []);
       await loadConflicts();
+      await loadDataInventory();
+    }
+
+    function backupFilename(prefix = "jarvis-export-v1") {
+      return `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    }
+
+    async function buildProtectedBackup(password, allowPlain = false) {
+      const pkg = await window.JarvisBackup.createPackage();
+      await window.JarvisBackup.validatePackage(pkg);
+      return allowPlain ? pkg : window.JarvisBackup.encryptPackage(pkg, password);
+    }
+
+    async function loadDataInventory() {
+      try {
+        $("inventoryStatus").textContent = "Leyendo datos sin modificarlos...";
+        const pkg = await window.JarvisBackup.createPackage();
+        const inventory = window.JarvisBackup.inventoryFromPackage(pkg);
+        const stats = inventory.statistics || {};
+        $("inventoryOrigin").textContent = `${inventory.origin} (${inventory.protocol})`;
+        $("inventoryDatabase").textContent = `${inventory.database_name} v${inventory.database_version}`;
+        $("inventoryEntities").textContent = stats.total_entities || 0;
+        $("inventoryPending").textContent = stats.pending_changes || 0;
+        $("inventoryConfirmed").textContent = stats.confirmed_changes || 0;
+        $("inventoryConflicts").textContent = stats.conflicts || 0;
+        $("inventoryDetail").textContent = `Workspace: ${shortId(inventory.workspace_id)}. Device: ${shortId(inventory.device_id)}. Ultimo contacto real: ${formatDate(inventory.last_contact)}. Cursor: ${Object.values(inventory.cursors || {}).filter(Boolean).join(", ") || "sin cursor"}. Ultimo respaldo registrado: ${formatDate(inventory.last_backup)}.`;
+        $("inventoryStores").innerHTML = Object.entries(stats.store_counts || {}).map(([name, count]) => `<tr><td data-label="Object store">${escapeHtml(name)}</td><td data-label="Registros">${count}</td></tr>`).join("") || `<tr><td colspan="2">No hay stores.</td></tr>`;
+        $("inventoryStatus").textContent = "Inventario actualizado. No se modifico ningun dato.";
+      } catch (error) {
+        $("inventoryStatus").textContent = error.message;
+      }
+    }
+
+    async function exportBackup(isPreImport) {
+      const status = isPreImport ? $("importStatus") : $("exportStatus");
+      try {
+        const plain = !isPreImport && $("plainExport").checked;
+        const password = isPreImport ? $("importPassword").value : $("exportPassword").value;
+        if (!plain) {
+          const confirmation = isPreImport ? password : $("exportPasswordConfirm").value;
+          if (password.length < 10) throw new Error("Usa una contraseña de al menos 10 caracteres.");
+          if (password !== confirmation) throw new Error("Las contraseñas no coinciden.");
+        }
+        status.textContent = "Generando y validando la copia completa...";
+        const output = await buildProtectedBackup(password, plain);
+        window.JarvisBackup.downloadJson(output, backupFilename(isPreImport ? "jarvis-pre-import-v1" : "jarvis-export-v1"));
+        localStorage.setItem("jarvis_last_backup_exported_at", new Date().toISOString());
+        status.textContent = plain ? "Copia sin cifrar descargada. Guardala en un lugar seguro." : "Copia cifrada descargada y validada.";
+        if (isPreImport) {
+          preImportBackupReady = true;
+          $("applyImportButton").disabled = false;
+        }
+        return true;
+      } catch (error) {
+        status.textContent = error.message;
+        return false;
+      }
+    }
+
+    async function reviewImport() {
+      reviewedImport = null;
+      preImportBackupReady = false;
+      $("applyImportButton").disabled = true;
+      $("importPreview").hidden = true;
+      $("importActions").hidden = true;
+      try {
+        const file = $("importFile").files[0];
+        if (!file) throw new Error("Selecciona primero un archivo de copia.");
+        $("importStatus").textContent = "Validando formato, cifrado e integridad...";
+        const pkg = await window.JarvisBackup.parseFileText(await file.text(), $("importPassword").value);
+        reviewedImport = await window.JarvisBackup.createPreview(pkg);
+        const preview = reviewedImport;
+        const s = preview.summary;
+        const workspaceMessage = preview.workspace_mismatch ? `<div class="warning-box">Este archivo pertenece a otro workspace. La importacion queda bloqueada; solo se permite comparar.</div>` : "";
+        const compatibilityMessage = preview.incompatible_stores.length ? `<div class="warning-box">Stores incompatibles: ${preview.incompatible_stores.map(escapeHtml).join(", ")}. Actualiza Jarvis antes de importar.</div>` : "";
+        $("importPreview").innerHTML = `
+          ${workspaceMessage}${compatibilityMessage}
+          <div class="grid-3">
+            <div class="card"><span>Origen</span><strong>${escapeHtml(pkg.source_origin)}</strong></div>
+            <div class="card"><span>Fecha</span><strong>${escapeHtml(formatDate(pkg.exported_at))}</strong></div>
+            <div class="card"><span>Version</span><strong>Formato ${pkg.format_version} / App ${escapeHtml(pkg.app_version)}</strong></div>
+          </div>
+          <div class="grid-3">
+            <div class="card"><span>Nuevos</span><strong>${s.new_records}</strong></div>
+            <div class="card"><span>Identicos</span><strong>${s.identical}</strong></div>
+            <div class="card"><span>Diferentes / conflictos</span><strong>${s.different}</strong></div>
+          </div>
+          <p class="muted">Workspace: ${escapeHtml(shortId(pkg.workspace_id))}. Device de origen: ${escapeHtml(shortId(pkg.device_id))}. Borrados logicos nuevos: ${s.logically_deleted}. Conflictos ya registrados para esta misma copia: ${s.existing_import_conflicts || 0}. Identidad actual: se conserva. localStorage actual: se conserva.</p>
+          <table class="data-table"><thead><tr><th>Store</th><th>Actual / copia / nuevos / iguales / diferentes</th></tr></thead><tbody>${Object.entries(s.stores).map(([name, item]) => `<tr><td>${escapeHtml(name)}</td><td>${item.current} / ${item.incoming} / ${item.new_records} / ${item.identical} / ${item.different}</td></tr>`).join("")}</tbody></table>`;
+        $("importPreview").hidden = false;
+        $("importActions").hidden = preview.workspace_mismatch || preview.incompatible_stores.length > 0;
+        $("importStatus").textContent = (preview.workspace_mismatch || preview.incompatible_stores.length) ? "Vista previa lista. No se modifico ningun dato; la importacion esta bloqueada por incompatibilidad." : "Vista previa lista. No se modifico ningun dato.";
+      } catch (error) {
+        $("importStatus").textContent = error.message;
+      }
+    }
+
+    async function downloadPreImportBackup() {
+      if (!reviewedImport) { $("importStatus").textContent = "Primero revisa el archivo."; return; }
+      if (!$("importPassword").value || $("importPassword").value.length < 10) {
+        $("importStatus").textContent = "Para el respaldo previo, ingresa una contraseña de al menos 10 caracteres.";
+        return;
+      }
+      await exportBackup(true);
+    }
+
+    async function applyReviewedImport() {
+      if (!reviewedImport || !preImportBackupReady) { $("importStatus").textContent = "Primero revisa el archivo y descarga el respaldo previo."; return; }
+      try {
+        $("applyImportButton").disabled = true;
+        $("importStatus").textContent = "Aplicando una unica transaccion...";
+        const result = await window.JarvisBackup.applyPreview(reviewedImport, { backupConfirmed:true });
+        $("importStatus").textContent = `La importacion se completo. Agregados: ${result.added}. Identicos conservados: ${result.identical}. Conflictos detectados: ${result.conflicts}. La identidad no cambio.`;
+        reviewedImport = null;
+        preImportBackupReady = false;
+        await loadStatus();
+      } catch (error) {
+        $("importStatus").textContent = error.message;
+        $("applyImportButton").disabled = false;
+      }
     }
 
     function renderDevices(devices) {
@@ -186,7 +380,7 @@
         await saveSettings();
         const fallback = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(location.origin) ? location.origin : "";
         const baseUrl = normalizeJarvisPeerUrl($("notebookUrl").value, fallback);
-        if (!baseUrl) throw new Error("Configura primero la URL/IP de la notebook. Ej: http://192.168.0.89:8765");
+        if (!baseUrl) throw new Error("Configura primero la URL/IP de la notebook. Ej: http://192.168.1.50:8765");
         await window.JarvisLocalStore.probeNotebook(baseUrl);
         let response;
         const controller = new AbortController();

@@ -76,5 +76,9 @@ try {
     Write-Host "Jarvis study calendar files tests OK"
 }
 finally {
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $resolvedRoot = [IO.Path]::GetFullPath($tempRoot)
+    $systemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if ($resolvedRoot.StartsWith($systemTemp, [StringComparison]::OrdinalIgnoreCase) -and (Split-Path $resolvedRoot -Leaf) -match '^jarvis-study-calendar-test-[0-9a-f]{32}$' -and (Test-Path -LiteralPath $resolvedRoot)) {
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+    }
 }

@@ -19,6 +19,7 @@ function Assert-True {
 
 $root = Join-Path $env:TEMP "jarvis-finance-methods-test-$([guid]::NewGuid().ToString("N"))"
 New-Item -ItemType Directory -Path $root | Out-Null
+try {
 Initialize-JarvisStorage -ProjectRoot $root
 Initialize-FinanceStorage -ProjectRoot $root
 Initialize-JarvisSyncStorage
@@ -60,3 +61,11 @@ $changes = @(Get-JarvisSyncChangesSince)
 Assert-True (@($changes | Where-Object { $_.entity -eq "finance_payment_methods" }).Count -gt 0) "Los metodos no entraron al historial de sync."
 
 Write-Host "Jarvis finance payment method tests OK"
+}
+finally {
+    $resolvedRoot = [IO.Path]::GetFullPath($root)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if ($resolvedRoot.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and (Split-Path $resolvedRoot -Leaf) -match '^jarvis-finance-methods-test-[0-9a-f]{32}$' -and (Test-Path -LiteralPath $resolvedRoot)) {
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+    }
+}
