@@ -58,9 +58,18 @@ function Send-JarvisResponse {
         [string]$Body
     )
 
-    $reason = if ($StatusCode -eq 200) { "OK" } elseif ($StatusCode -eq 404) { "Not Found" } else { "Error" }
+    $reason = switch ($StatusCode) {
+        200 { "OK" }
+        400 { "Bad Request" }
+        401 { "Unauthorized" }
+        403 { "Forbidden" }
+        404 { "Not Found" }
+        408 { "Request Timeout" }
+        413 { "Payload Too Large" }
+        default { "Error" }
+    }
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
-    $header = "HTTP/1.1 $StatusCode $reason`r`nContent-Type: $ContentType; charset=utf-8`r`nContent-Length: $($bodyBytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-Jarvis-Workspace-Id, X-Jarvis-Device-Id, X-Jarvis-Sync-Secret`r`nConnection: close`r`n`r`n"
+    $header = "HTTP/1.1 $StatusCode $reason`r`nContent-Type: $ContentType; charset=utf-8`r`nContent-Length: $($bodyBytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-Jarvis-Workspace-Id, X-Jarvis-Device-Id, X-Jarvis-Sync-Secret`r`nAccess-Control-Allow-Private-Network: true`r`nAccess-Control-Max-Age: 600`r`nVary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers`r`nConnection: close`r`n`r`n"
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
     if (-not (Write-JarvisStream -Stream $Stream -Bytes $headerBytes)) {
         return $false
@@ -98,7 +107,7 @@ function Send-JarvisBinaryFile {
     )
 
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $header = "HTTP/1.1 200 OK`r`nContent-Type: $ContentType`r`nContent-Length: $($bytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-Jarvis-Workspace-Id, X-Jarvis-Device-Id, X-Jarvis-Sync-Secret`r`nConnection: close`r`n`r`n"
+    $header = "HTTP/1.1 200 OK`r`nContent-Type: $ContentType`r`nContent-Length: $($bytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-Jarvis-Workspace-Id, X-Jarvis-Device-Id, X-Jarvis-Sync-Secret`r`nAccess-Control-Allow-Private-Network: true`r`nVary: Origin`r`nConnection: close`r`n`r`n"
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
     if (-not (Write-JarvisStream -Stream $Stream -Bytes $headerBytes)) {
         return $false
@@ -107,42 +116,81 @@ function Send-JarvisBinaryFile {
 }
 
 function Read-JarvisRequest {
-    param([System.Net.Sockets.TcpClient]$Client)
+    param(
+        [System.Net.Sockets.TcpClient]$Client,
+        [int]$MaxHeaderBytes = 32768,
+        [int]$MaxBodyBytes = 1048576
+    )
 
     $stream = $Client.GetStream()
-    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8, $false, 4096, $true)
-    $requestLine = $reader.ReadLine()
-    if ([string]::IsNullOrWhiteSpace($requestLine)) {
-        return $null
+    $headerBytes = [System.Collections.Generic.List[byte]]::new()
+    $terminatorState = 0
+
+    while ($headerBytes.Count -lt $MaxHeaderBytes) {
+        $value = $stream.ReadByte()
+        if ($value -lt 0) {
+            if ($headerBytes.Count -eq 0) { return $null }
+            throw [System.IO.InvalidDataException]::new("La conexion se cerro antes de completar los encabezados HTTP.")
+        }
+        $headerBytes.Add([byte]$value)
+
+        if (($terminatorState -eq 0 -or $terminatorState -eq 2) -and $value -eq 13) {
+            $terminatorState++
+        }
+        elseif (($terminatorState -eq 1 -or $terminatorState -eq 3) -and $value -eq 10) {
+            $terminatorState++
+            if ($terminatorState -eq 4) { break }
+        }
+        else {
+            $terminatorState = if ($value -eq 13) { 1 } else { 0 }
+        }
+    }
+
+    if ($terminatorState -ne 4) {
+        throw [System.IO.InvalidDataException]::new("Los encabezados HTTP superan el limite de $MaxHeaderBytes bytes.")
+    }
+
+    $headerText = [System.Text.Encoding]::ASCII.GetString($headerBytes.ToArray())
+    $lines = @($headerText.Substring(0, $headerText.Length - 4) -split "`r`n")
+    $requestLine = $lines[0]
+    $requestParts = @($requestLine.Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries))
+    if ($requestParts.Count -lt 2) {
+        throw [System.IO.InvalidDataException]::new("La linea inicial HTTP no es valida.")
     }
 
     $headers = @{}
-    while ($true) {
-        $line = $reader.ReadLine()
-        if ($null -eq $line -or $line -eq "") {
-            break
-        }
-
+    foreach ($line in @($lines | Select-Object -Skip 1)) {
         $parts = $line.Split(":", 2)
         if ($parts.Count -eq 2) {
             $headers[$parts[0].Trim().ToLowerInvariant()] = $parts[1].Trim()
         }
     }
 
-    $body = ""
-    if ($headers.ContainsKey("content-length")) {
-        $length = [int]$headers["content-length"]
-        if ($length -gt 0) {
-            $buffer = New-Object char[] $length
-            [void]$reader.ReadBlock($buffer, 0, $length)
-            $body = -join $buffer
-        }
+    $length = 0
+    if ($headers.ContainsKey("content-length") -and -not [int]::TryParse($headers["content-length"], [ref]$length)) {
+        throw [System.IO.InvalidDataException]::new("Content-Length no es valido.")
+    }
+    if ($length -lt 0 -or $length -gt $MaxBodyBytes) {
+        throw [System.IO.InvalidDataException]::new("El cuerpo HTTP supera el limite de $MaxBodyBytes bytes.")
     }
 
-    $parts = $requestLine.Split(" ")
+    $body = ""
+    if ($length -gt 0) {
+        $bodyBytes = New-Object byte[] $length
+        $offset = 0
+        while ($offset -lt $length) {
+            $read = $stream.Read($bodyBytes, $offset, $length - $offset)
+            if ($read -le 0) {
+                throw [System.IO.InvalidDataException]::new("La conexion se cerro antes de completar el cuerpo HTTP.")
+            }
+            $offset += $read
+        }
+        $body = [System.Text.Encoding]::UTF8.GetString($bodyBytes)
+    }
+
     return [pscustomobject]@{
-        method = $parts[0]
-        target = $parts[1]
+        method = $requestParts[0]
+        target = $requestParts[1]
         body = $body
         headers = $headers
         stream = $stream
@@ -788,7 +836,13 @@ function Handle-JarvisSyncApiRoute {
 
     if ($Request.method -eq "POST" -and $Path -eq "/api/sync/pairing/complete") {
         $body = Get-JarvisJsonBody -Body $Request.body
-        $paired = Complete-JarvisPairing -PairingCode $body.pairing_code -DeviceId $body.device_id -DeviceName (Get-JarvisSafeText -Value $body.device_name -Fallback "Dispositivo vinculado")
+        try {
+            $paired = Complete-JarvisPairing -PairingCode $body.pairing_code -DeviceId $body.device_id -DeviceName (Get-JarvisSafeText -Value $body.device_name -Fallback "Dispositivo vinculado")
+        }
+        catch {
+            Send-JarvisJson -Stream $Request.stream -StatusCode 400 -Value @{ ok = $false; error = $_.Exception.Message }
+            return $true
+        }
         Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{
             ok = $true
             workspace_id = $paired.workspace_id
@@ -870,6 +924,17 @@ function Handle-JarvisRequest {
             Send-JarvisResponse -Stream $Request.stream -StatusCode 200 -ContentType "text/plain" -Body ""
             return
         }
+        if ($Request.method -eq "GET" -and $path -eq "/api/health") {
+            Send-JarvisJson -Stream $Request.stream -StatusCode 200 -Value @{
+                ok = $true
+                service = "jarvis-web"
+                pid = $PID
+                port = $script:JarvisWebPort
+                instance_id = $script:JarvisWebInstanceId
+                started_at = $script:JarvisWebStartedAt
+            }
+            return
+        }
         if (Handle-JarvisStaticRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisPageRoute -Request $Request -Path $path) { return }
         if (Handle-JarvisRecordsApiRoute -Request $Request -Path $path) { return }
@@ -904,12 +969,30 @@ function Get-JarvisLocalAddresses {
 
     $addresses = @("http://localhost:$Port")
     try {
-        $hostEntry = [System.Net.Dns]::GetHostEntry([System.Net.Dns]::GetHostName())
-        foreach ($address in $hostEntry.AddressList) {
-            if ($address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and
-                -not $address.ToString().StartsWith("169.254")) {
-                $addresses += "http://$($address.ToString()):$Port"
+        $candidates = foreach ($adapter in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+            if ($adapter.OperationalStatus -ne [System.Net.NetworkInformation.OperationalStatus]::Up) { continue }
+            if ($adapter.NetworkInterfaceType -eq [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback) { continue }
+            if ("$($adapter.Name) $($adapter.Description)" -match "(?i)virtual|vpn|bluetooth|loopback|hyper-v|vmware|vethernet|wi-fi direct|wintun|tap") { continue }
+
+            $properties = $adapter.GetIPProperties()
+            $hasGateway = @($properties.GatewayAddresses | Where-Object {
+                $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and
+                -not $_.Address.Equals([System.Net.IPAddress]::Any)
+            }).Count -gt 0
+            if (-not $hasGateway) { continue }
+
+            foreach ($unicast in $properties.UnicastAddresses) {
+                $address = $unicast.Address
+                if ($address.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { continue }
+                if ($address.ToString().StartsWith("169.254")) { continue }
+                [pscustomobject]@{
+                    address = $address.ToString()
+                    priority = if ($adapter.NetworkInterfaceType -eq [System.Net.NetworkInformation.NetworkInterfaceType]::Wireless80211) { 0 } else { 1 }
+                }
             }
+        }
+        foreach ($candidate in @($candidates | Sort-Object priority, address)) {
+            $addresses += "http://$($candidate.address):$Port"
         }
     }
     catch {}
@@ -950,8 +1033,30 @@ function Start-JarvisWebServer {
         return
     }
 
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
-    $listener.Start()
+    $script:JarvisWebPort = $Port
+    $script:JarvisWebInstanceId = [guid]::NewGuid().ToString("N")
+    $script:JarvisWebStartedAt = (Get-Date).ToString("o")
+    $runtimeDirectory = Join-Path $ProjectRoot "data\runtime"
+    $pidFile = if ($Port -eq 8765) { Join-Path $runtimeDirectory "jarvis-web.pid" } else { Join-Path $runtimeDirectory "jarvis-web-$Port.pid" }
+    $instanceFile = if ($Port -eq 8765) { Join-Path $runtimeDirectory "jarvis-web.instance.json" } else { Join-Path $runtimeDirectory "jarvis-web-$Port.instance.json" }
+    $listener = $null
+
+    if (-not (Test-Path -LiteralPath $runtimeDirectory)) {
+        New-Item -ItemType Directory -Path $runtimeDirectory | Out-Null
+    }
+
+    try {
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
+        $listener.Start()
+        "$PID" | Set-Content -LiteralPath $pidFile -Encoding ASCII
+        [pscustomobject]@{
+            pid = $PID
+            port = $Port
+            project_root = [System.IO.Path]::GetFullPath($ProjectRoot)
+            instance_id = $script:JarvisWebInstanceId
+            started_at = $script:JarvisWebStartedAt
+            executable = (Get-Process -Id $PID).Path
+        } | ConvertTo-Json | Set-Content -LiteralPath $instanceFile -Encoding UTF8
 
     if (-not $Quiet) {
         Write-Host ""
@@ -971,26 +1076,47 @@ function Start-JarvisWebServer {
         Write-Host ""
     }
 
-    while ($true) {
-        $client = $listener.AcceptTcpClient()
-        try {
-            $request = Read-JarvisRequest -Client $client
-            if ($null -ne $request) {
-                Handle-JarvisRequest -Request $request
+        while ($true) {
+            $client = $null
+            $stream = $null
+            try {
+                $client = $listener.AcceptTcpClient()
+                $client.ReceiveTimeout = 3000
+                $client.SendTimeout = 3000
+                $stream = $client.GetStream()
+                $stream.ReadTimeout = 3000
+                $stream.WriteTimeout = 3000
+                $request = Read-JarvisRequest -Client $client
+                if ($null -ne $request) {
+                    Handle-JarvisRequest -Request $request
+                }
             }
-        }
-        catch {
-            if (-not (Test-JarvisClientDisconnect -ErrorRecord $_)) {
-                if (-not $Quiet) {
-                    Write-Host "Error atendiendo solicitud: $($_.Exception.Message)" -ForegroundColor Yellow
+            catch {
+                if (-not (Test-JarvisClientDisconnect -ErrorRecord $_)) {
+                    if (-not $Quiet) {
+                        Write-Host "Error atendiendo solicitud: $($_.Exception.Message)" -ForegroundColor Yellow
+                    }
+                }
+            }
+            finally {
+                if ($null -ne $stream) {
+                    try { $stream.Dispose() } catch {}
+                }
+                if ($null -ne $client) {
+                    try { $client.Close() } catch {}
+                    try { $client.Dispose() } catch {}
                 }
             }
         }
-        finally {
-            try {
-                $client.Close()
-            }
-            catch {}
+    }
+    finally {
+        if ($null -ne $listener) {
+            try { $listener.Stop() } catch {}
+        }
+        $currentPid = if (Test-Path -LiteralPath $pidFile) { (Get-Content -LiteralPath $pidFile -Raw -ErrorAction SilentlyContinue).Trim() } else { "" }
+        if ($currentPid -eq "$PID") {
+            Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $instanceFile -Force -ErrorAction SilentlyContinue
         }
     }
 }

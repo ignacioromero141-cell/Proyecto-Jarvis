@@ -7,6 +7,8 @@
   const DEVICE_NAME_KEY = "jarvis_device_name";
   const SYNC_SECRET_KEY = "jarvis_sync_secret";
   const NOTEBOOK_URL_KEY = "jarvis_notebook_sync_url";
+  const LAST_CONTACT_KEY = "jarvis_notebook_last_contact";
+  const FETCH_TIMEOUT_MS = 5000;
 
   const defaultCategories = [
     { id:"income", label:"Ingreso", kind:"income", color:"#2176ae", enabled:true, sort_order:10 },
@@ -417,6 +419,52 @@
     }
   }
 
+  function connectionContext(notebookUrl = "") {
+    const target = normalizeNotebookUrl(notebookUrl);
+    const targetProtocol = target ? new URL(target).protocol : "";
+    return {
+      app_origin:location.origin,
+      app_protocol:location.protocol,
+      notebook_url:target,
+      mixed_content_blocked:location.protocol === "https:" && targetProtocol === "http:"
+    };
+  }
+
+  function assertConnectionAllowed(notebookUrl) {
+    const context = connectionContext(notebookUrl);
+    if (context.mixed_content_blocked) {
+      throw new Error(`Jarvis esta abierto desde ${context.app_origin} (HTTPS), pero la notebook usa ${context.notebook_url} (HTTP). Safari bloquea ese fetch como contenido mixto antes de enviarlo. Abri Jarvis desde la URL LAN de la notebook o configura HTTPS local.`);
+    }
+    return context;
+  }
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal:controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function probeNotebook(notebookUrl) {
+    const baseUrl = normalizeNotebookUrl(notebookUrl);
+    assertConnectionAllowed(baseUrl);
+    let response;
+    try {
+      response = await fetchWithTimeout(`${baseUrl}/api/health`, { method:"GET", cache:"no-store" }, 3500);
+    } catch (error) {
+      throw new Error(networkErrorMessage(error, baseUrl));
+    }
+    const data = await readJsonResponse(response, `${baseUrl}/api/health`);
+    if (!response.ok || data.ok !== true || data.service !== "jarvis-web") {
+      throw new Error(`La URL ${baseUrl} respondio, pero no corresponde a un servidor Jarvis compatible.`);
+    }
+    localStorage.setItem(LAST_CONTACT_KEY, new Date().toISOString());
+    return data;
+  }
+
   async function readJsonResponse(response, label) {
     const contentType = response.headers.get("Content-Type") || "";
     const text = await response.text();
@@ -433,8 +481,11 @@
 
   function networkErrorMessage(error, url) {
     const message = String(error?.message || error || "");
+    if (/aborterror|aborted/i.test(`${error?.name || ""} ${message}`)) {
+      return `La notebook en ${url} no respondio dentro del tiempo esperado. El servidor puede estar ocupado o bloqueado.`;
+    }
     if (/load failed|failed to fetch|networkerror/i.test(message)) {
-      return `No se pudo conectar con la notebook en ${url}. Verifica que Jarvis este abierto, que ambos dispositivos esten en la misma Wi-Fi y que la URL/IP sea correcta.`;
+      return `El navegador no pudo completar la conexion con ${url}. Si la app esta en HTTPS y la notebook en HTTP, es contenido mixto; si no, revisa el permiso de red local, CORS o la IP guardada.`;
     }
     return message || "No se pudo completar la conexion.";
   }
@@ -467,6 +518,8 @@
       conflict_count:conflicts.length,
       notebook_url:notebookUrl,
       last_sync_at:metadata?.last_sync_at || null,
+      last_contact_at:localStorage.getItem(LAST_CONTACT_KEY),
+      connection_context:connectionContext(notebookUrl),
       last_server_cursor:metadata?.last_server_cursor || null,
       linked_devices:JSON.parse(localStorage.getItem("jarvis_linked_devices") || "[]")
     };
@@ -485,6 +538,7 @@
     await ensureDefaults();
     const notebookUrl = normalizeNotebookUrl(body.notebook_url || localStorage.getItem(NOTEBOOK_URL_KEY) || defaultNotebookUrl());
     if (!notebookUrl) throw new Error("Configura la URL de la notebook para sincronizar.");
+    await probeNotebook(notebookUrl);
     localStorage.setItem(NOTEBOOK_URL_KEY, notebookUrl);
 
     const metadataKey = syncMetadataKey(notebookUrl);
@@ -492,7 +546,7 @@
     const localChanges = (await pendingChanges()).map((change) => ({ ...change, workspace_id:change.workspace_id || workspaceId() }));
     let response;
     try {
-      response = await fetch(`${notebookUrl}/api/sync/apply`, {
+      response = await fetchWithTimeout(`${notebookUrl}/api/sync/apply`, {
         method:"POST",
         headers:authHeaders(),
         body:JSON.stringify({
@@ -566,9 +620,10 @@
     if (!notebookUrl) throw new Error("Configura la URL/IP del dispositivo a vincular.");
     const pairingCode = String(body.pairing_code || "").replace(/\s/g, "");
     if (!pairingCode) throw new Error("Ingresa el codigo de vinculacion.");
+    await probeNotebook(notebookUrl);
     let response;
     try {
-      response = await fetch(`${notebookUrl}/api/sync/pairing/complete`, {
+      response = await fetchWithTimeout(`${notebookUrl}/api/sync/pairing/complete`, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body:JSON.stringify({
@@ -592,7 +647,8 @@
     if (Array.isArray(data.linked_devices)) {
       localStorage.setItem("jarvis_linked_devices", JSON.stringify(data.linked_devices));
     }
-    return { ok:true, status:await syncStatus() };
+    const firstSync = await syncWithNotebook({ notebook_url:notebookUrl });
+    return { ok:true, first_sync:firstSync, status:await syncStatus() };
   }
 
   async function saveSyncSettings(body = {}) {
@@ -1557,5 +1613,43 @@
     throw new Error("Ruta local no disponible.");
   }
 
-  window.JarvisLocalStore = { handle, deviceId, workspaceId, importNotebookSnapshotIfNeeded, syncStatus, syncWithNotebook };
+  let automaticAttempt = 0;
+  let automaticTimer = null;
+
+  function canAutoSync() {
+    const notebookUrl = normalizeNotebookUrl(localStorage.getItem(NOTEBOOK_URL_KEY));
+    let devices = [];
+    try { devices = JSON.parse(localStorage.getItem("jarvis_linked_devices") || "[]"); } catch {}
+    return notebookUrl && devices.some((device) => device.device_id === deviceId());
+  }
+
+  function scheduleAutomaticSync(delayMs = 1200) {
+    if (!canAutoSync() || automaticTimer) return;
+    automaticTimer = setTimeout(async () => {
+      automaticTimer = null;
+      try {
+        await syncWithNotebook();
+        automaticAttempt = 0;
+        window.dispatchEvent(new CustomEvent("jarvis-sync-state", { detail:{ ok:true } }));
+      } catch (error) {
+        automaticAttempt++;
+        window.dispatchEvent(new CustomEvent("jarvis-sync-state", { detail:{ ok:false, error:error.message } }));
+        if (navigator.onLine && automaticAttempt < 3) {
+          scheduleAutomaticSync([5000, 15000, 60000][automaticAttempt - 1]);
+        }
+      }
+    }, delayMs);
+  }
+
+  window.addEventListener("online", () => {
+    automaticAttempt = 0;
+    scheduleAutomaticSync(500);
+  });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => scheduleAutomaticSync());
+  } else {
+    scheduleAutomaticSync();
+  }
+
+  window.JarvisLocalStore = { handle, deviceId, workspaceId, importNotebookSnapshotIfNeeded, syncStatus, syncWithNotebook, probeNotebook, connectionContext };
 })();

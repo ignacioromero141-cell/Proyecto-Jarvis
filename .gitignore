@@ -7,3 +7,4 @@ data/
 *.pfx
 *secret*
 *token*
+/analysis_example_media

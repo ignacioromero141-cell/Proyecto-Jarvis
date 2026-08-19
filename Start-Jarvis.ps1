@@ -5,135 +5,79 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RuntimeDir = Join-Path $ProjectRoot "data\runtime"
+. (Join-Path $ProjectRoot "Jarvis-Runtime.ps1")
+
 $Url = "http://localhost:$Port"
-
-function Get-JarvisPidFile {
-    if ($Port -eq 8765) {
-        return (Join-Path $RuntimeDir "jarvis-web.pid")
-    }
-    return (Join-Path $RuntimeDir "jarvis-web-$Port.pid")
-}
-
-$PidFile = Get-JarvisPidFile
+$Paths = Get-JarvisRuntimePaths -ProjectRoot $ProjectRoot -Port $Port
 
 function Show-JarvisMessage {
     param([string]$Message)
+    if ($NoBrowser) { Write-Host $Message; return }
     try {
         $shell = New-Object -ComObject WScript.Shell
-        [void]$shell.Popup($Message, 8, "Jarvis", 64)
+        [void]$shell.Popup($Message, 10, "Jarvis", 64)
     }
-    catch {
-        Write-Host $Message
-    }
+    catch { Write-Host $Message }
 }
 
-function Test-JarvisServer {
-    $client = $null
-    try {
-        $client = [System.Net.Sockets.TcpClient]::new()
-        $connect = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
-        if (-not $connect.AsyncWaitHandle.WaitOne(300)) {
-            return $false
-        }
-        $client.EndConnect($connect)
-        $client.ReceiveTimeout = 700
-        $client.SendTimeout = 700
-        $stream = $client.GetStream()
-        $requestBytes = [System.Text.Encoding]::ASCII.GetBytes("GET /api/sync/status HTTP/1.1`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`n")
-        $stream.Write($requestBytes, 0, $requestBytes.Length)
-        $buffer = New-Object byte[] 256
-        $read = $stream.Read($buffer, 0, $buffer.Length)
-        if ($read -le 0) {
-            return $false
-        }
-        $responseText = [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
-        return $responseText.StartsWith("HTTP/1.1 200")
-    }
-    catch {
-        return $false
-    }
-    finally {
-        if ($null -ne $client) {
-            $client.Close()
-        }
-    }
+if (-not (Test-Path -LiteralPath $Paths.RuntimeDirectory)) {
+    New-Item -ItemType Directory -Path $Paths.RuntimeDirectory | Out-Null
 }
 
-function Get-JarvisListenerPid {
-    try {
-        $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($connection -and $connection.OwningProcess) {
-            return [int]$connection.OwningProcess
-        }
-    }
-    catch {}
-
-    try {
-        $lines = @(netstat -ano -p tcp 2>$null | Select-String "LISTENING")
-        foreach ($line in $lines) {
-            $text = ($line.Line -replace "\s+", " ").Trim()
-            $parts = $text.Split(" ")
-            if ($parts.Count -ge 5 -and $parts[1] -match ":$Port$") {
-                return [int]$parts[4]
-            }
-        }
-    }
-    catch {}
-
-    return $null
-}
-
-if (-not (Test-Path -LiteralPath $RuntimeDir)) {
-    New-Item -ItemType Directory -Path $RuntimeDir | Out-Null
-}
-
-if (Test-JarvisServer) {
-    $listenerPid = Get-JarvisListenerPid
-    if ($listenerPid) {
-        $listenerPid | Set-Content -LiteralPath $PidFile -Encoding ASCII
-    }
-    if (-not $NoBrowser) {
-        Start-Process $Url
-    }
+$createdNew = $false
+$mutex = [System.Threading.Mutex]::new($true, (Get-JarvisStartMutexName -ProjectRoot $ProjectRoot -Port $Port), [ref]$createdNew)
+if (-not $createdNew) {
+    $mutex.Dispose()
+    Show-JarvisMessage "Jarvis ya esta procesando otra orden de inicio o detencion. Espera unos segundos y volve a intentar."
     return
 }
 
-if (Test-Path -LiteralPath $PidFile) {
-    Remove-Item -LiteralPath $PidFile -Force
-}
+try {
+    $listenerPid = Get-JarvisListenerPid -Port $Port
+    if ($listenerPid) {
+        $health = Invoke-JarvisHealthCheck -Port $Port -TimeoutMilliseconds 1200
+        $metadata = Get-JarvisInstanceMetadata -InstanceFile $Paths.InstanceFile
+        $ownership = Test-JarvisOwnedListener -ProjectRoot $ProjectRoot -Port $Port -ListenerPid $listenerPid -Health $health -Metadata $metadata
 
-$scriptPath = Join-Path $ProjectRoot "jarvis-web.ps1"
-$powerShellPath = (Get-Command powershell.exe).Source
-$processInfo = [System.Diagnostics.ProcessStartInfo]::new()
-$processInfo.FileName = $powerShellPath
-$processInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Port $Port -Quiet"
-$processInfo.WorkingDirectory = $ProjectRoot
-$processInfo.UseShellExecute = $true
-$processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-
-$process = [System.Diagnostics.Process]::Start($processInfo)
-
-$process.Id | Set-Content -LiteralPath $PidFile -Encoding ASCII
-
-for ($attempt = 0; $attempt -lt 20; $attempt++) {
-    Start-Sleep -Milliseconds 500
-    if (Test-JarvisServer) {
-        if (-not $NoBrowser) {
-            Start-Process $Url
+        if ($health -and $ownership.Owned) {
+            if (-not $NoBrowser) { Start-Process $Url }
+            return
         }
+        if ($ownership.Owned) {
+            Show-JarvisMessage "Jarvis esta activo en el puerto $Port (PID $listenerPid), pero no responde. No se inicio otra copia. Usa 'Detener Jarvis' y luego volve a iniciar para recuperarlo de forma segura."
+            return
+        }
+        Show-JarvisMessage "El puerto $Port esta ocupado por otro proceso (PID $listenerPid). Jarvis no lo modifico ni intento iniciar otra instancia."
         return
     }
-    if ($process.HasExited) {
-        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
-        Show-JarvisMessage "No se pudo iniciar Jarvis en el puerto $Port. El proceso se cerro antes de aceptar conexiones."
-        return
-    }
-}
 
-if (-not $process.HasExited) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    Remove-JarvisStaleRuntimeFiles -Paths $Paths
+    $scriptPath = Join-Path $ProjectRoot "jarvis-web.ps1"
+    $powerShellPath = (Get-Command powershell.exe).Source
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $powerShellPath
+    $processInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Port $Port -Quiet"
+    $processInfo.WorkingDirectory = $ProjectRoot
+    $processInfo.UseShellExecute = $true
+    $processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $process = [System.Diagnostics.Process]::Start($processInfo)
+
+    for ($attempt = 0; $attempt -lt 24; $attempt++) {
+        Start-Sleep -Milliseconds 250
+        $health = Invoke-JarvisHealthCheck -Port $Port -TimeoutMilliseconds 500
+        if ($health -and $health.service -eq "jarvis-web" -and [int]$health.pid -eq $process.Id) {
+            if (-not $NoBrowser) { Start-Process $Url }
+            return
+        }
+        if ($process.HasExited) {
+            Show-JarvisMessage "No se pudo iniciar Jarvis en el puerto $Port. El proceso termino con codigo $($process.ExitCode)."
+            return
+        }
+    }
+
+    Show-JarvisMessage "Jarvis se inicio con PID $($process.Id), pero no alcanzo a responder dentro de 6 segundos. No se detuvo automaticamente: usa 'Detener Jarvis' si necesitas recuperarlo."
 }
-Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
-Show-JarvisMessage "No se pudo iniciar Jarvis en el puerto $Port. Revisa si otra app esta usando el puerto o si Windows bloqueo el acceso de red."
+finally {
+    try { $mutex.ReleaseMutex() } catch {}
+    $mutex.Dispose()
+}

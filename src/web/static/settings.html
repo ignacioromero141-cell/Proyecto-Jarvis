@@ -82,6 +82,7 @@
           <button onclick="syncNow()">Sincronizar ahora</button>
           <button class="light" onclick="saveSettings()">Guardar URL</button>
         </div>
+        <p id="connectionDetail" class="muted"></p>
         <div id="syncStatus" class="status"></div>
       </section>
 
@@ -147,7 +148,9 @@
       $("lastSync").textContent = formatDate(currentStatus.last_sync_at);
       $("pendingCount").textContent = currentStatus.pending_total || currentStatus.legacy_pending_total || 0;
       $("conflictCount").textContent = currentStatus.conflict_count || 0;
-      $("connectionState").textContent = safeText(currentStatus.notebook_url) ? "Configurado" : "Sin URL";
+      $("connectionState").textContent = currentStatus.last_contact_at ? "Contactado" : (safeText(currentStatus.notebook_url) ? "Sin probar" : "Sin URL");
+      const context = currentStatus.connection_context || {};
+      $("connectionDetail").textContent = `App: ${context.app_origin || location.origin}. URL notebook: ${currentStatus.notebook_url || "sin configurar"}. Ultimo contacto: ${formatDate(currentStatus.last_contact_at)}.`;
       renderDevices(currentStatus.linked_devices || []);
       await loadConflicts();
     }
@@ -184,15 +187,22 @@
         const fallback = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(location.origin) ? location.origin : "";
         const baseUrl = normalizeJarvisPeerUrl($("notebookUrl").value, fallback);
         if (!baseUrl) throw new Error("Configura primero la URL/IP de la notebook. Ej: http://192.168.0.89:8765");
+        await window.JarvisLocalStore.probeNotebook(baseUrl);
         let response;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
         try {
           response = await fetch(`${baseUrl}/api/sync/pairing/start`, {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
-            body:JSON.stringify({})
+            body:JSON.stringify({}),
+            signal:controller.signal
           });
         } catch (error) {
-          throw new Error(`No se pudo conectar con la notebook en ${baseUrl}. Verifica que Jarvis este abierto, que ambos dispositivos esten en la misma Wi-Fi y que la URL/IP sea correcta.`);
+          if (error.name === "AbortError") throw new Error(`La notebook en ${baseUrl} no respondio al solicitar el codigo.`);
+          throw error;
+        } finally {
+          clearTimeout(timer);
         }
         const data = await readJsonResponse(response, `${baseUrl}/api/sync/pairing/start`);
         if (!response.ok || data.ok === false) throw new Error(data.error || "No se pudo generar el codigo.");
@@ -211,7 +221,8 @@
           pairing_code:$("joinCode").value,
           device_name:$("deviceName").value
         });
-        $("pairingStatus").textContent = "Dispositivo vinculado.";
+        const firstSync = data.first_sync || {};
+        $("pairingStatus").textContent = `Dispositivo vinculado y primera sincronizacion completa. Enviados: ${firstSync.sent || 0}. Recibidos: ${firstSync.received || 0}.`;
         currentStatus = data.status || data;
         await loadStatus();
       } catch (error) {
@@ -267,6 +278,15 @@
     }
 
     loadStatus().catch((error) => $("syncStatus").textContent = error.message);
+    window.addEventListener("jarvis-sync-state", (event) => {
+      if (event.detail?.ok) {
+        $("connectionState").textContent = "Contactado";
+        loadStatus().catch(() => {});
+      } else if (event.detail?.error) {
+        $("connectionState").textContent = "No disponible";
+        $("syncStatus").textContent = `Sincronizacion automatica pendiente: ${event.detail.error}`;
+      }
+    });
   </script>
 </body>
 </html>
